@@ -3,6 +3,11 @@ import Views from "../../../lib/Routing/Views";
 import { Route } from "./Config";
 import { portfolioPages, projects } from "./Data";
 
+const isMobileViewport = () => {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+};
+
 export default class Manager extends Views {
   constructor() {
     super(Route);
@@ -82,13 +87,31 @@ export default class Manager extends Views {
     this.detailBottomIntent = 0;
     this.detailBottomIntentAt = 0;
     this.currentStageLabel = "";
+    this.isMobile = isMobileViewport();
+    this.mode = null;
+    this.commonEvents = [];
+    this.desktopEvents = [];
+    this.mobileEvents = [];
+    this.boundFilterHandlers = [];
+    this.boundCardHandlers = [];
+    this.boundNearPanelHandlers = [];
+    this.boundFeaturePanelHandlers = [];
+    this.mobileFrame = 0;
+    this.lastMobileSceneY = -1;
+    this.lastMobileSceneAt = 0;
   }
 
   in({ InFinish }) {
     this.cacheDom();
+    this.isMobile = isMobileViewport();
     this.cursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     this.border = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     this.bindEvents();
+    if (this.isMobile) {
+      this.setupMobileMode();
+    } else {
+      this.setupDesktopMode();
+    }
     this.prepareLoader();
     this.animation = GSAP.timeline({
       onComplete: InFinish,
@@ -98,6 +121,9 @@ export default class Manager extends Views {
 
   out({ NextShow, OutFinish }) {
     this.unbindEvents();
+    this.teardownDesktopMode();
+    this.teardownMobileMode();
+    window.clearTimeout(this.detailBottomUnlockTimer);
     this.animation = GSAP.timeline({
       onStart: NextShow,
       onComplete: OutFinish,
@@ -204,6 +230,18 @@ export default class Manager extends Views {
   }
 
   prepareLoader() {
+    if (this.isMobile) {
+      GSAP.set(this.DOM.header, { autoAlpha: 0, y: 0 });
+      GSAP.set(this.DOM.loader, { autoAlpha: 1 });
+      GSAP.set(this.DOM.aboutSheet, { autoAlpha: 0 });
+      GSAP.set(this.DOM.enter, { autoAlpha: 1, scale: 1, pointerEvents: "all" });
+      GSAP.set(this.DOM.percent, { yPercent: -130, opacity: 0 });
+      GSAP.set(".EnterButton__copy", { yPercent: 0 });
+      this.DOM.percent.textContent = 100;
+      this.DOM.enter.classList.add("is-ready");
+      return;
+    }
+
     GSAP.set(this.DOM.header, { autoAlpha: 0, y: 24 });
     GSAP.set(".CenterTitle", { autoAlpha: 0, scale: 0.94 });
     GSAP.set(this.DOM.aboutSheet, { autoAlpha: 0 });
@@ -241,6 +279,20 @@ export default class Manager extends Views {
     this.bottomProjectOpened = false;
     this.DOM.root.classList.add("is-entered");
     this.isEntered = true;
+    if (this.isMobile) {
+      this.resetMobileScene();
+      GSAP.to(this.DOM.loader, {
+        autoAlpha: 0,
+        duration: 0.24,
+        ease: "power1.out",
+        onComplete: () => {
+          if (this.DOM.loader) this.DOM.loader.style.pointerEvents = "none";
+        },
+      });
+      GSAP.to(this.DOM.header, { autoAlpha: 1, duration: 0.22, ease: "power1.out" });
+      return;
+    }
+
     GSAP.timeline()
       .to(this.DOM.enter, { scale: 0.42, rotate: -24, autoAlpha: 0, duration: 0.75, ease: "expo.inOut" }, 0)
       .to(".LoaderLocal__rings", { scale: 1.85, rotate: 44, autoAlpha: 0, duration: 1.28, ease: "expo.inOut" }, 0)
@@ -254,6 +306,13 @@ export default class Manager extends Views {
   }
 
   bindEvents() {
+    this.commonEvents = [];
+    this.desktopEvents = [];
+    this.boundFilterHandlers = [];
+    this.boundCardHandlers = [];
+    this.boundNearPanelHandlers = [];
+    this.boundFeaturePanelHandlers = [];
+
     this.enterHandler = () => this.enterSite();
     this.contactHandler = () => this.toggleContact();
     this.prevHandler = () => this.changeProject(-1);
@@ -269,68 +328,222 @@ export default class Manager extends Views {
     this.dragMoveHandler = (event) => this.onDragMove(event);
     this.dragEndHandler = () => this.onDragEnd();
     this.clickCaptureHandler = (event) => this.onClickCapture(event);
+    this.detailCloseHandler = () => this.closeDetail();
+    this.cursorOverHandler = (event) => this.onCursorOver(event);
+    this.cursorOutHandler = (event) => this.onCursorOut(event);
 
-    this.DOM.enter.addEventListener("click", this.enterHandler);
-    this.DOM.contactToggle.addEventListener("click", this.contactHandler);
-    this.DOM.prev.addEventListener("click", this.prevHandler);
-    this.DOM.next.addEventListener("click", this.nextHandler);
-    this.DOM.openAll.addEventListener("click", this.openAllHandler);
-    this.DOM.detailClose.addEventListener("click", () => this.closeDetail());
-    window.addEventListener("scroll", this.scrollHandler, { passive: true });
-    window.addEventListener("wheel", this.pageWheelHandler, { passive: true });
-    this.DOM.detail.addEventListener("scroll", this.detailScrollHandler, { passive: true });
-    this.DOM.detail.addEventListener("wheel", this.detailWheelHandler, { passive: true });
-    window.addEventListener("mousemove", this.pointerHandler, { passive: true });
-    window.addEventListener("pointermove", this.dragMoveHandler, { passive: true });
-    window.addEventListener("pointerup", this.dragEndHandler, { passive: true });
-    window.addEventListener("keydown", this.keyHandler);
-    this.DOM.spaceStage.addEventListener("pointerdown", this.dragStartHandler, { passive: true });
-    document.addEventListener("click", this.clickCaptureHandler, true);
+    this.addEvent(this.DOM.enter, "click", this.enterHandler);
+    this.addEvent(this.DOM.contactToggle, "click", this.contactHandler);
+    this.addEvent(this.DOM.prev, "click", this.prevHandler);
+    this.addEvent(this.DOM.next, "click", this.nextHandler);
+    this.addEvent(this.DOM.openAll, "click", this.openAllHandler);
+    this.addEvent(this.DOM.detailClose, "click", this.detailCloseHandler);
+    this.addEvent(window, "keydown", this.keyHandler);
 
     this.filters.forEach((button) => {
-      button.addEventListener("click", () => this.setFilter(button.dataset.filter));
+      const handler = () => this.setFilter(button.dataset.filter);
+      this.boundFilterHandlers.push({ button, handler });
+      this.addEvent(button, "click", handler);
     });
 
     this.cards.forEach((card) => {
-      card.addEventListener("click", () => this.openPageDetail(this.pageByNumber.get(card.dataset.page)));
+      const handler = () => this.openPageDetail(this.pageByNumber.get(card.dataset.page));
+      this.boundCardHandlers.push({ card, handler });
+      this.addEvent(card, "click", handler);
     });
     this.nearPanels.forEach((panel) => {
-      panel.addEventListener("click", () => this.openPageDetail(this.pageByNumber.get(panel.dataset.page)));
+      const handler = () => this.openPageDetail(this.pageByNumber.get(panel.dataset.page));
+      this.boundNearPanelHandlers.push({ panel, handler });
+      this.addEvent(panel, "click", handler);
     });
     this.featurePanels.forEach((panel) => {
-      panel.addEventListener("click", () => {
+      const handler = () => {
         const project = projects.find((item) => item.title === panel.dataset.project);
         if (project) this.openProject(project);
-      });
+      };
+      this.boundFeaturePanelHandlers.push({ panel, handler });
+      this.addEvent(panel, "click", handler);
     });
-
-    document.addEventListener("mouseover", this.cursorOverHandler = (event) => this.onCursorOver(event));
-    document.addEventListener("mouseout", this.cursorOutHandler = (event) => this.onCursorOut(event));
   }
 
   unbindEvents() {
-    window.removeEventListener("scroll", this.scrollHandler);
-    window.removeEventListener("wheel", this.pageWheelHandler);
-    this.DOM.detail?.removeEventListener("scroll", this.detailScrollHandler);
-    this.DOM.detail?.removeEventListener("wheel", this.detailWheelHandler);
-    window.removeEventListener("mousemove", this.pointerHandler);
-    window.removeEventListener("pointermove", this.dragMoveHandler);
-    window.removeEventListener("pointerup", this.dragEndHandler);
-    window.removeEventListener("keydown", this.keyHandler);
-    this.DOM.spaceStage?.removeEventListener("pointerdown", this.dragStartHandler);
-    document.removeEventListener("click", this.clickCaptureHandler, true);
-    document.removeEventListener("mouseover", this.cursorOverHandler);
-    document.removeEventListener("mouseout", this.cursorOutHandler);
+    this.removeEvents("desktopEvents");
+    this.removeEvents("mobileEvents");
+    this.removeEvents("commonEvents");
+    this.boundFilterHandlers = [];
+    this.boundCardHandlers = [];
+    this.boundNearPanelHandlers = [];
+    this.boundFeaturePanelHandlers = [];
+  }
+
+  addEvent(target, type, handler, options, bucket = "commonEvents") {
+    if (!target || !handler) return;
+    target.addEventListener(type, handler, options);
+    this[bucket].push({ target, type, handler, options });
+  }
+
+  removeEvents(bucket) {
+    this[bucket].forEach(({ target, type, handler, options }) => {
+      target.removeEventListener(type, handler, options);
+    });
+    this[bucket] = [];
+  }
+
+  setupDesktopMode() {
+    if (this.mode === "desktop") return;
+    this.teardownMobileMode();
+    this.mode = "desktop";
+    this.isMobile = false;
+    this.DOM.root?.classList.remove("is-mobile-mode");
+    this.DOM.root?.classList.add("is-desktop-mode");
+    this.removeEvents("mobileEvents");
+    this.addEvent(window, "scroll", this.scrollHandler, { passive: true }, "desktopEvents");
+    this.addEvent(window, "wheel", this.pageWheelHandler, { passive: true }, "desktopEvents");
+    this.addEvent(this.DOM.detail, "scroll", this.detailScrollHandler, { passive: true }, "desktopEvents");
+    this.addEvent(this.DOM.detail, "wheel", this.detailWheelHandler, { passive: true }, "desktopEvents");
+    this.addEvent(window, "mousemove", this.pointerHandler, { passive: true }, "desktopEvents");
+    this.addEvent(window, "pointermove", this.dragMoveHandler, { passive: true }, "desktopEvents");
+    this.addEvent(window, "pointerup", this.dragEndHandler, { passive: true }, "desktopEvents");
+    this.addEvent(this.DOM.spaceStage, "pointerdown", this.dragStartHandler, { passive: true }, "desktopEvents");
+    this.addEvent(document, "click", this.clickCaptureHandler, true, "desktopEvents");
+    this.addEvent(document, "mouseover", this.cursorOverHandler, undefined, "desktopEvents");
+    this.addEvent(document, "mouseout", this.cursorOutHandler, undefined, "desktopEvents");
+    this.updateScene(true);
+  }
+
+  teardownDesktopMode() {
+    this.removeEvents("desktopEvents");
+    this.dragState = null;
+    this.swallowNextClick = false;
+    if (this.mode === "desktop") this.mode = null;
+  }
+
+  setupMobileMode() {
+    if (this.mode === "mobile") return;
+    this.teardownDesktopMode();
+    this.mode = "mobile";
+    this.isMobile = true;
+    this.dragState = null;
+    this.swallowNextClick = false;
+    this.DOM.root?.classList.remove("is-desktop-mode");
+    this.DOM.root?.classList.add("is-mobile-mode");
+    this.addEvent(window, "scroll", this.scrollHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "scroll", this.detailScrollHandler, { passive: true }, "mobileEvents");
+    this.resetMobileScene();
+  }
+
+  teardownMobileMode() {
+    if (this.mode !== "mobile") return;
+    this.removeEvents("mobileEvents");
+    this.DOM.root?.classList.remove("is-mobile-mode");
+    this.mode = null;
+  }
+
+  syncViewportMode() {
+    const nextIsMobile = isMobileViewport();
+    if (nextIsMobile === this.isMobile && this.mode) return false;
+    this.isMobile = nextIsMobile;
+    if (this.isMobile) {
+      this.setupMobileMode();
+    } else {
+      this.setupDesktopMode();
+    }
+    return true;
+  }
+
+  resetMobileScene() {
+    this.mouse = { x: 0.5, y: 0.5 };
+    this.cursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.border = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.progress = 0;
+    this.targetProgress = 0;
+    this.lastProgress = -1;
+    this.lastMobileSceneY = -1;
+    this.lastMobileSceneAt = 0;
+    this.currentStageLabel = "";
+    if (this.DOM.spaceCamera) this.DOM.spaceCamera.style.transform = "";
+    if (this.DOM.scrollProgress) this.DOM.scrollProgress.style.transform = "";
+    [this.DOM.centerTitle, this.DOM.aboutSheet, this.DOM.worksSheet].forEach((element) => {
+      if (!element) return;
+      element.style.opacity = "";
+      element.style.visibility = "";
+      element.style.transform = "";
+      element.style.pointerEvents = "";
+    });
+    [...this.cards, ...this.featurePanels, ...this.nearPanels, ...this.dust].forEach((element) => {
+      element.style.opacity = "";
+      element.style.filter = "";
+      element.style.transform = "";
+      element.style.pointerEvents = "";
+      element.style.willChange = "";
+    });
+    if (this.DOM.detailToplineCurrent) this.DOM.detailToplineCurrent.textContent = "01";
+    const detailToplineText = this.DOM.detail?.querySelector(".DetailTopline span:last-child");
+    if (detailToplineText) detailToplineText.textContent = "SCROLL GALLERY";
+    this.updateMobileListState();
+    this.updateMobileScene(true);
+  }
+
+  updateMobileScene(force = false) {
+    if (!this.isMobile || !this.DOM?.root) return;
+    if (document.visibilityState === "hidden") return;
+
+    const now = Date.now();
+    const scrollY = window.scrollY || 0;
+    if (!force && Math.abs(scrollY - this.lastMobileSceneY) < 2 && now - this.lastMobileSceneAt < 80) return;
+
+    this.lastMobileSceneY = scrollY;
+    this.lastMobileSceneAt = now;
+    this.updateTargetProgress();
+
+    const viewportHeight = Math.max(1, window.innerHeight);
+    const progress = this.targetProgress;
+    this.DOM.root.style.setProperty("--scene-progress", `${progress}`);
+    this.DOM.root.style.setProperty("--center-opacity", `${Math.max(0.18, 1 - progress * 1.2)}`);
+    if (this.DOM.scrollProgress) {
+      this.DOM.scrollProgress.style.transform = `scaleX(${progress})`;
+    }
+
+    if (this.DOM.centerTitle && !this.DOM.root.classList.contains("is-detail-open")) {
+      const titleShift = Math.max(-24, Math.min(16, -scrollY * 0.035));
+      this.DOM.centerTitle.style.transform = `translate3d(0, ${titleShift}px, 0)`;
+    }
+
+    const animateMobileItem = (element, index, strength = 1) => {
+      if (!element || element.classList.contains("is-hidden")) return;
+      const rect = element.getBoundingClientRect();
+      if (rect.bottom < -160 || rect.top > viewportHeight + 160) return;
+      const centerOffset = (rect.top + rect.height * 0.5 - viewportHeight * 0.5) / viewportHeight;
+      const y = Math.max(-18, Math.min(18, centerOffset * -26 * strength));
+      const scale = 0.975 + Math.max(0, 1 - Math.abs(centerOffset) * 1.4) * 0.025;
+      const opacity = 0.72 + Math.max(0, 1 - Math.abs(centerOffset) * 1.5) * 0.28;
+      element.style.transform = `translate3d(0, ${y}px, 0) scale(${scale})`;
+      element.style.opacity = opacity;
+      element.classList.toggle("is-mobile-active", opacity > 0.88);
+      element.style.setProperty("--mobile-delay", `${Math.min(index, 8) * 0.035}s`);
+    };
+
+    this.featurePanels.forEach((panel, index) => animateMobileItem(panel, index, 0.8));
+    this.cards.forEach((card, index) => {
+      if (card.dataset.layer !== "0") return;
+      animateMobileItem(card, index, 0.55);
+    });
+    if (this.DOM.aboutSheet && !this.DOM.root.classList.contains("is-detail-open")) {
+      animateMobileItem(this.DOM.aboutSheet, 0, 0.45);
+    }
   }
 
   onClickCapture(event) {
     if (!this.swallowNextClick) return;
-    event.preventDefault();
+    if (!this.isMobile && event.cancelable) {
+      event.preventDefault();
+    }
     event.stopImmediatePropagation();
     this.swallowNextClick = false;
   }
 
   onDragStart(event) {
+    if (this.isMobile) return;
     if (!this.isEntered || this.DOM.root.classList.contains("is-detail-open") || this.DOM.root.classList.contains("is-contact-open")) return;
     this.dragState = {
       y: event.clientY,
@@ -340,6 +553,7 @@ export default class Manager extends Views {
   }
 
   onDragMove(event) {
+    if (this.isMobile) return;
     if (!this.dragState) return;
     const delta = this.dragState.y - event.clientY;
     if (Math.abs(delta) > 8) this.dragState.active = true;
@@ -389,6 +603,7 @@ export default class Manager extends Views {
   }
 
   onPageWheel(event) {
+    if (this.isMobile) return;
     if (!this.isEntered || this.DOM.root.classList.contains("is-detail-open") || this.DOM.root.classList.contains("is-contact-open")) return;
 
     const maxScroll = this.getMaxScroll();
@@ -406,6 +621,7 @@ export default class Manager extends Views {
   }
 
   onDetailScroll() {
+    if (this.isMobile) return;
     if (!this.DOM.root.classList.contains("is-detail-open")) return;
     if (this.currentDetailProjectIndex < 0) return;
     if (Date.now() < this.detailIgnoreScrollUntil) return;
@@ -436,6 +652,7 @@ export default class Manager extends Views {
   }
 
   onDetailWheel(event) {
+    if (this.isMobile) return;
     if (!this.DOM.root.classList.contains("is-detail-open")) return;
     if (this.currentDetailProjectIndex < 0) return;
     if (Date.now() < this.detailIgnoreScrollUntil || this.detailBottomLocked) return;
@@ -454,6 +671,7 @@ export default class Manager extends Views {
   }
 
   onPointerMove(event) {
+    if (this.isMobile) return;
     this.mouse.x = event.clientX / window.innerWidth;
     this.mouse.y = event.clientY / window.innerHeight;
     GSAP.set(this.DOM.cursor, { autoAlpha: 1 });
@@ -533,6 +751,12 @@ export default class Manager extends Views {
     this.activeFilter = filter;
     this.activeIndex = 0;
     this.updateFilterState(filter);
+    if (this.isMobile) {
+      this.updateMobileListState();
+      const firstVisibleCard = this.cards.find((card) => !card.classList.contains("is-hidden") && card.dataset.layer === "0");
+      firstVisibleCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     this.jumpToFilter(filter);
     this.updateScene(true);
   }
@@ -540,6 +764,21 @@ export default class Manager extends Views {
   updateFilterState(filter) {
     this.activeFilter = filter;
     this.filters.forEach((button) => button.classList.toggle("is-active", button.dataset.filter === filter));
+  }
+
+  updateMobileListState() {
+    if (!this.isMobile) return;
+    this.cards.forEach((card) => {
+      const matchesFilter = this.activeFilter === "all" || card.dataset.type === this.activeFilter;
+      const isPrimaryLayer = card.dataset.layer === "0";
+      card.classList.toggle("is-hidden", !matchesFilter || !isPrimaryLayer);
+    });
+    this.nearPanels.forEach((panel) => {
+      panel.classList.toggle("is-hidden", true);
+    });
+    this.featurePanels.forEach((panel) => {
+      panel.classList.remove("is-hidden");
+    });
   }
 
   getFilterFromProgress(progress) {
@@ -571,6 +810,13 @@ export default class Manager extends Views {
   }
 
   jumpToFilter(filter) {
+    if (this.isMobile) {
+      this.updateMobileListState();
+      const firstVisibleCard = this.cards.find((card) => !card.classList.contains("is-hidden") && card.dataset.layer === "0");
+      firstVisibleCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
     const progressByFilter = {
       all: 0.02,
       work: 0.66,
@@ -589,6 +835,12 @@ export default class Manager extends Views {
     if (!activePages.length) return;
     this.activeIndex = (this.activeIndex + direction + activePages.length) % activePages.length;
     const activePage = activePages[this.activeIndex];
+    if (this.isMobile) {
+      const targetCard = this.cards.find((card) => card.dataset.page === activePage.number && card.dataset.layer === "0");
+      targetCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
     const target = activePage.index / Math.max(portfolioPages.length - 1, 1);
     window.scrollTo({
       top: target * this.getMaxScroll(),
@@ -845,11 +1097,14 @@ export default class Manager extends Views {
       })),
     ];
 
-    const renderItem = (image) => `
+    const renderItem = (image, index = 0) => {
+      const loading = index === 0 ? "eager" : "lazy";
+      return `
       <figure class="GalleryItem ${image.size}${image.preserveFrame ? " is-preserve" : ""}${image.fitFull ? " is-fit-full" : ""}">
-        <img src="${image.src}" alt="${image.title}" loading="lazy" decoding="async" />
+        <img src="${image.src}" alt="${image.alt || image.title || project.title}" loading="${loading}" decoding="async" draggable="false" />
       </figure>
     `;
+    };
 
     if (project.title === "BRAND") {
       return `
@@ -863,9 +1118,9 @@ export default class Manager extends Views {
       const [cover, ...pairs] = images;
       return `
         <div class="GalleryIP${project.title === "AIGC VISUAL" ? " GalleryOther" : ""}">
-          ${cover ? renderItem(cover) : ""}
+          ${cover ? renderItem(cover, 0) : ""}
           <div class="GalleryPairGrid GalleryPairGrid--ip">
-            ${pairs.map(renderItem).join("")}
+            ${pairs.map((image, index) => renderItem(image, index + 1)).join("")}
           </div>
         </div>
       `;
@@ -878,13 +1133,13 @@ export default class Manager extends Views {
       const rightColumn = ["06", "09", "08"].map((number) => imageByNumber.get(number)).filter(Boolean);
 
       return `
-        ${cover ? renderItem(cover) : ""}
+        ${cover ? renderItem(cover, 0) : ""}
         <div class="GalleryColumns GalleryColumns--business">
           <div class="GalleryColumn">
-            ${leftColumn.map(renderItem).join("")}
+            ${leftColumn.map((image, index) => renderItem(image, index + 1)).join("")}
           </div>
           <div class="GalleryColumn">
-            ${rightColumn.map(renderItem).join("")}
+            ${rightColumn.map((image, index) => renderItem(image, index + leftColumn.length + 1)).join("")}
           </div>
         </div>
       `;
@@ -921,7 +1176,7 @@ export default class Manager extends Views {
     this.currentDetailProjectIndex = this.detailProjectSequence.indexOf(project.title);
     this.detailSuppressBottomTrigger = false;
     this.resetBottomPushIntent("detail");
-    this.lockDetailBottomBriefly();
+    if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
     this.DOM.detail.setAttribute("aria-hidden", "false");
@@ -946,7 +1201,7 @@ export default class Manager extends Views {
     this.currentDetailProjectIndex = this.detailProjectSequence.indexOf(project.title);
     this.detailSuppressBottomTrigger = false;
     this.resetBottomPushIntent("detail");
-    this.lockDetailBottomBriefly();
+    if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
     this.DOM.detail.setAttribute("aria-hidden", "false");
@@ -961,7 +1216,7 @@ export default class Manager extends Views {
       ? this.buildGallery(project)
       : `
         <figure class="GalleryItem xlarge">
-          <img src="${page.src}" alt="${page.title}" decoding="async" />
+          <img src="${page.src}" alt="${page.title}" loading="eager" decoding="async" draggable="false" />
         </figure>
         ${this.buildGallery(project)}
       `;
@@ -972,6 +1227,7 @@ export default class Manager extends Views {
   }
 
   openNextDetailProject() {
+    if (this.isMobile) return;
     const nextProjectTitle = this.detailProjectSequence[this.currentDetailProjectIndex + 1];
     if (!nextProjectTitle) return;
 
@@ -992,6 +1248,7 @@ export default class Manager extends Views {
   }
 
   openPreviousDetailProject() {
+    if (this.isMobile) return;
     const previousProjectTitle = this.detailProjectSequence[this.currentDetailProjectIndex - 1];
     if (!previousProjectTitle) return;
 
@@ -1018,6 +1275,7 @@ export default class Manager extends Views {
   }
 
   lockDetailBottomBriefly() {
+    if (this.isMobile) return;
     this.detailBottomLocked = true;
     this.detailIgnoreScrollUntil = Date.now() + 1100;
     if (this.DOM.detail) this.DOM.detail.style.overflowY = "hidden";
@@ -1041,11 +1299,25 @@ export default class Manager extends Views {
     this.resetBottomPushIntent("detail");
     if (this.DOM.detail) this.DOM.detail.style.overflowY = "";
     window.clearTimeout(this.detailBottomUnlockTimer);
+    if (this.isMobile) window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   revealGallery() {
     const items = [...this.DOM.detailGallery.querySelectorAll(".GalleryItem")];
     const intro = this.DOM.detailGallery.querySelector(".GalleryIntro");
+    if (this.isMobile) {
+      if (intro) {
+        GSAP.fromTo(intro, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.24, ease: "power1.out" });
+      }
+      items.forEach((item) => {
+        GSAP.set(item, { "--reveal": "105%" });
+        const image = item.querySelector("img");
+        if (image) GSAP.set(image, { clearProps: "transform" });
+      });
+      GSAP.fromTo(items, { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.28, stagger: 0.025, ease: "power1.out" });
+      return;
+    }
+
     if (intro) {
       GSAP.fromTo(intro, { autoAlpha: 0, y: 44 }, { autoAlpha: 1, y: 0, duration: 0.85, ease: "expo.out" });
     }
@@ -1057,6 +1329,14 @@ export default class Manager extends Views {
   }
 
   revealDetailHero() {
+    if (this.isMobile) {
+      GSAP.killTweensOf(this.DOM.detail);
+      GSAP.fromTo(this.DOM.detail, { autoAlpha: 0.68, y: 24 }, { autoAlpha: 1, y: 0, duration: 0.34, ease: "power2.out" });
+      if (this.DOM.detailNextCue) {
+        GSAP.fromTo(this.DOM.detailNextCue, { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.32, delay: 0.18, ease: "power2.out" });
+      }
+      return;
+    }
     GSAP.killTweensOf([this.DOM.detailHero, this.DOM.detailPreview, this.DOM.detailTitle, this.DOM.detailSummary, this.DOM.detailIndex]);
     GSAP.set(this.DOM.detailHero, { "--detail-wipe": "0%" });
     GSAP.timeline({ defaults: { ease: "expo.out" } })
@@ -1093,6 +1373,14 @@ export default class Manager extends Views {
 
   TIME() {
     if (!this.DOM?.root) return;
+    if (document.visibilityState === "hidden") return;
+    if (this.isMobile) {
+      this.mobileFrame = (this.mobileFrame + 1) % 3;
+      if (this.mobileFrame === 0 && this.isEntered && !this.DOM.root.classList.contains("is-contact-open")) {
+        this.updateMobileScene(false);
+      }
+      return;
+    }
     this.sceneTime += 0.016;
     if (this.isEntered && !this.DOM.root.classList.contains("is-detail-open") && !this.DOM.root.classList.contains("is-contact-open")) {
       const maxScroll = this.getMaxScroll();
@@ -1114,6 +1402,11 @@ export default class Manager extends Views {
   }
 
   SIZES() {
+    if (this.syncViewportMode()) return;
+    if (this.isMobile) {
+      this.updateMobileScene(true);
+      return;
+    }
     this.updateScene(true);
   }
 }

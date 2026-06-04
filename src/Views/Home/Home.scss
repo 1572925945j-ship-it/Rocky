@@ -2145,3 +2145,441 @@ main {
     bottom: 1rem;
   }
 }
+
+@media (max-width: 768px) {
+  html,
+  body {
+    width: 100%;
+    min-height: 100%;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  body {
+    cursor: auto;
+  }
+
+  main,
+  [data-key="/"] {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .GRBPortfolio[data-template="Home"] {
+    width: 100%;
+    min-height: 100dvh;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: visible;
+    touch-action: pan-y;
+    cursor: auto;
+  }
+
+  .GRBPortfolio[data-template="Home"] button,
+  .GRBPortfolio[data-template="Home"] a {
+    cursor: pointer;
+  }
+
+  .GRBPortfolio[data-template="Home"] * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .CursorLocal,
+  .CursorLocal__border,
+  .ScrollHint,
+  .ScrollDepth,
+  .NearPass,
+  .ChapterWords,
+  .AboutWord,
+  .WorkWord,
+  .LabWord {
+    display: none;
+  }
+
+  .Noise:after {
+    opacity: 0.026;
+    animation-duration: 0.18s;
+  }
+
+  .HeaderLocal {
+    mix-blend-mode: difference;
+  }
+
+  .StageMeta {
+    display: none;
+  }
+
+  .ScrollProgress {
+    display: block;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+  }
+
+  .SpaceStage {
+    position: relative;
+    inset: auto;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding: 9rem 1.6rem 4rem;
+    perspective: 620px;
+    touch-action: pan-y;
+  }
+
+  .SpaceStage:before,
+  .SpaceStage:after {
+    opacity: 0.42;
+  }
+
+  .SpaceCamera,
+  .Space,
+  .ShowcaseRail {
+    position: relative;
+    inset: auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.6rem;
+    width: 100%;
+    transform-style: preserve-3d;
+    will-change: auto;
+  }
+
+  .SpaceCamera {
+    order: 1;
+  }
+
+  .SpaceDust {
+    display: block;
+    opacity: 0.36;
+    pointer-events: none;
+  }
+
+  .SpaceDust__dot {
+    animation-duration: 4.8s;
+    will-change: auto;
+  }
+
+  .SpaceDust__dot:nth-child(n + 33) {
+    display: none;
+  }
+
+  .ShowcaseRail {
+    order: -1;
+    pointer-events: auto;
+  }
+
+  .CenterTitle {
+    position: relative;
+    left: auto;
+    top: auto;
+    order: 0;
+    width: 100%;
+    padding: 1rem 0 2.8rem;
+    opacity: var(--center-opacity, 1);
+    visibility: visible;
+    pointer-events: auto;
+    mix-blend-mode: normal;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+
+  .CenterTitle:before {
+    opacity: 0.45;
+  }
+
+  .CenterTitle h1 {
+    font-size: clamp(64px, 22vw, 118px);
+    filter: none;
+    transform: perspective(520px) rotateX(var(--title-x, 0deg)) rotateY(var(--title-y, 0deg));
+  }
+
+  .CenterTitle p {
+    width: min(100%, 32rem);
+    margin-top: 1.2rem;
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+
+  .OpenAll {
+    display: inline-grid;
+    margin-top: 1.8rem;
+    font-size: 1.5rem;
+  }
+
+  .FeaturePanel,
+  .SpaceCard {
+    position: relative;
+    left: auto;
+    top: auto;
+    display: grid;
+    width: min(100%, 52rem);
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    margin: 0 auto 1.6rem;
+    opacity: 0.78;
+    filter: none;
+    transform: translate3d(0, 16px, 0) scale(0.97);
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
+    pointer-events: auto;
+    will-change: auto;
+    contain: layout paint;
+    animation: grb-mobile-card-rise 0.52s cubic-bezier(0.19, 1, 0.22, 1) both;
+    animation-delay: var(--mobile-delay, 0s);
+    transition: opacity 0.28s ease, transform 0.28s ease, filter 0.28s ease;
+  }
+
+  .FeaturePanel.is-mobile-active,
+  .SpaceCard.is-mobile-active {
+    will-change: transform, opacity;
+  }
+
+  .FeaturePanel {
+    padding: 0.75rem;
+    box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, 0.46);
+  }
+
+  .FeaturePanel:before,
+  .SpaceCard:before {
+    opacity: 0.2;
+    transform: translateZ(-1px) scale(0.985);
+  }
+
+  .FeaturePanel img,
+  .SpaceCard img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    backface-visibility: hidden;
+    filter: grayscale(0.16) contrast(1.04);
+    animation-duration: 11s;
+    will-change: auto;
+  }
+
+  .FeaturePanel__meta,
+  .FeaturePanel__caption {
+    gap: 1rem;
+    font-size: 1.45rem;
+  }
+
+  .FeaturePanel__caption span {
+    font-size: 1rem;
+  }
+
+  .SpaceCard[data-layer="1"],
+  .SpaceCard[data-layer="2"],
+  .SpaceCard.is-hidden {
+    display: none;
+  }
+
+  .SpaceCard,
+  .SpaceCard--feature,
+  .SpaceCard--portrait {
+    width: min(100%, 52rem);
+  }
+
+  .SpaceCard__label {
+    position: static;
+    display: flex;
+    gap: 0.7rem;
+    justify-content: space-between;
+    margin-top: 0.75rem;
+    color: #fff;
+    font-size: 1rem;
+    white-space: normal;
+    opacity: 0.92;
+    transform: translateZ(1px);
+  }
+
+  .Sheet--about {
+    position: relative;
+    left: auto;
+    top: auto;
+    order: 2;
+    width: min(100%, 52rem);
+    margin: 1.2rem auto 0;
+    padding: 0.75rem;
+    opacity: 0.96;
+    visibility: visible;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+    will-change: auto;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  .GRBPortfolio.is-detail-open .SpaceStage {
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.32s ease;
+  }
+
+  .ProjectDetail {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    height: auto;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 6.5rem 1.6rem 5rem;
+    touch-action: pan-y;
+    transition: opacity 0.32s ease, visibility 0.32s ease, transform 0.32s ease;
+  }
+
+  .GRBPortfolio.is-detail-open .ProjectDetail {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: all;
+  }
+
+  .DetailClose {
+    position: sticky;
+    top: 1.2rem;
+    right: auto;
+    z-index: 10;
+    width: max-content;
+    margin: 0 0 2rem auto;
+    font-size: 1.35rem;
+  }
+
+  .DetailTopline {
+    position: relative;
+    top: auto;
+    max-width: 100%;
+    padding: 0 0 1.8rem;
+    font-size: 0.95rem;
+    mix-blend-mode: normal;
+  }
+
+  .DetailTopline__current {
+    font-size: 2rem;
+  }
+
+  .DetailHero {
+    min-height: auto;
+    padding: 0;
+    overflow: visible;
+    perspective: 620px;
+  }
+
+  .DetailPreview {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: 100%;
+    opacity: 1;
+    backface-visibility: hidden;
+    will-change: auto;
+  }
+
+  .DetailTitle h2,
+  .DetailTitle p {
+    filter: none;
+    mix-blend-mode: normal;
+  }
+
+  .DetailGallery,
+  .GalleryBrand,
+  .GalleryIP,
+  .GalleryOther,
+  .GalleryPairGrid,
+  .GalleryColumns,
+  .GalleryColumn {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  .DetailGallery {
+    margin: 0 auto;
+  }
+
+  .GalleryBrand,
+  .GalleryIP,
+  .GalleryOther,
+  .GalleryPairGrid,
+  .GalleryColumns,
+  .GalleryColumn {
+    gap: 0;
+  }
+
+  .GalleryItem,
+  .GalleryItem.large,
+  .GalleryItem.xlarge,
+  .GalleryBrand .GalleryItem,
+  .GalleryIP .GalleryItem,
+  .GalleryPairGrid .GalleryItem {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    margin: 0 0 1.4rem;
+    overflow: visible;
+    backface-visibility: hidden;
+    box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, 0.24);
+    will-change: auto;
+  }
+
+  .GalleryItem img,
+  .DetailGallery img,
+  .GalleryBrand img,
+  .GalleryIP img,
+  .GalleryOther img,
+  .GalleryPairGrid img,
+  .GalleryColumns img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+    backface-visibility: hidden;
+    filter: contrast(1.02);
+    will-change: auto;
+  }
+
+  .ContactPanel {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .ContactWrapper {
+    min-height: 100dvh;
+    height: auto;
+  }
+}
+
+@keyframes grb-mobile-card-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0) scale(0.96);
+  }
+
+  to {
+    opacity: 0.86;
+    transform: translate3d(0, 0, 0) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
