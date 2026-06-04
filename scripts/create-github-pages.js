@@ -5,6 +5,13 @@ const root = path.resolve(__dirname, "..");
 const distPublic = path.join(root, "dist", "public");
 const docs = path.join(root, "docs");
 const docsStatic = path.join(docs, "static");
+const getAssetVersion = () => {
+  const mainJs = path.join(distPublic, "main.js");
+  const mainCss = path.join(distPublic, "main.js.css");
+  const jsMtime = fs.statSync(mainJs).mtimeMs;
+  const cssMtime = fs.statSync(mainCss).mtimeMs;
+  return Math.max(jsMtime, cssMtime).toString(36).replace(".", "");
+};
 
 const copyDir = (from, to) => {
   fs.mkdirSync(to, { recursive: true });
@@ -25,6 +32,7 @@ const removeDir = (target) => {
 
 removeDir(docs);
 copyDir(distPublic, docsStatic);
+const assetVersion = getAssetVersion();
 
 const mainJs = path.join(docsStatic, "main.js");
 if (fs.existsSync(mainJs)) {
@@ -54,7 +62,7 @@ const html = `<!DOCTYPE html>
     <link rel="icon" type="image/ico" href="/Rocky/static/Meta/favicon.ico" />
     <link rel="apple-touch-icon" href="/Rocky/static/Meta/apple-touch-icon.png" />
     <link rel="manifest" href="/Rocky/static/site.webmanifest" />
-    <link rel="stylesheet" href="/Rocky/static/main.js.css" />
+    <link rel="stylesheet" href="/Rocky/static/main.js.css?v=${assetVersion}" />
   </head>
   <body>
     <main id="root">
@@ -77,7 +85,7 @@ const html = `<!DOCTYPE html>
         });
       }
     </script>
-    <script defer src="/Rocky/static/main.js"></script>
+    <script defer src="/Rocky/static/main.js?v=${assetVersion}"></script>
   </body>
 </html>
 `;
