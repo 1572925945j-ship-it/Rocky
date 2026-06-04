@@ -291,8 +291,10 @@ export default class Manager extends Views {
   enterSite() {
     if (this.DOM.root.classList.contains("is-entered")) return;
     window.scrollTo(0, 0);
-    this.targetProgress = 0;
-    this.progress = 0;
+    const initialProgress = this.isMobile ? this.getMobileStartProgress() : 0;
+    this.targetProgress = initialProgress;
+    this.progress = initialProgress;
+    this.lastProgress = -1;
     this.bottomProjectOpened = false;
     this.DOM.root.classList.add("is-entered");
     this.isEntered = true;
@@ -790,7 +792,7 @@ export default class Manager extends Views {
 
     const maxScroll = this.getMaxScroll();
     this.lastScrollY = window.scrollY;
-    this.targetProgress = Math.min(1, Math.max(0, window.scrollY / maxScroll));
+    this.targetProgress = this.mapScrollProgress(window.scrollY / maxScroll);
   }
 
   openBottomProject() {
@@ -807,6 +809,25 @@ export default class Manager extends Views {
   getMaxScroll() {
     const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
     return Math.max(1, scrollHeight - window.innerHeight);
+  }
+
+  getMobileStartProgress() {
+    return 0.3;
+  }
+
+  mapScrollProgress(progress) {
+    const normalized = this.clamp(progress);
+    if (!this.isMobile) return normalized;
+    const start = this.getMobileStartProgress();
+    return this.clamp(start + normalized * (1 - start));
+  }
+
+  getScrollTopForProgress(progress) {
+    const maxScroll = this.getMaxScroll();
+    if (!this.isMobile) return this.clamp(progress) * maxScroll;
+    const start = this.getMobileStartProgress();
+    const normalized = (this.clamp(progress) - start) / Math.max(1 - start, 0.001);
+    return this.clamp(normalized) * maxScroll;
   }
 
   getActivePages() {
@@ -849,6 +870,13 @@ export default class Manager extends Views {
   }
 
   getStageFromProgress(progress) {
+    if (this.isMobile) {
+      if (progress < 0.39) return { index: "00", title: "ROCKY / RESUME" };
+      if (progress < 0.53) return { index: "01", title: "BUSINESS" };
+      if (progress < 0.67) return { index: "02", title: "BRAND" };
+      if (progress < 0.81) return { index: "03", title: "IP DESIGN" };
+      return { index: "04", title: "AIGC VISUAL" };
+    }
     if (progress < 0.16) return { index: "01", title: "ABOUT / PROFILE" };
     if (progress < 0.58) return { index: "02", title: "PORTFOLIO SPACE" };
     if (progress < 0.86) return { index: "03", title: "SELECTED WORKS" };
@@ -879,7 +907,7 @@ export default class Manager extends Views {
     const targetProgress = progressByFilter[filter];
     if (targetProgress === undefined) return;
     window.scrollTo({
-      top: targetProgress * this.getMaxScroll(),
+      top: this.getScrollTopForProgress(targetProgress),
       behavior: "smooth",
     });
   }
@@ -891,7 +919,7 @@ export default class Manager extends Views {
     const activePage = activePages[this.activeIndex];
     const target = activePage.index / Math.max(portfolioPages.length - 1, 1);
     window.scrollTo({
-      top: target * this.getMaxScroll(),
+      top: this.getScrollTopForProgress(target),
       behavior: "smooth",
     });
   }
@@ -903,10 +931,13 @@ export default class Manager extends Views {
     const drift = Math.sin(this.progress * 8 + metric.order * 0.3 + idle) * metric.floatRange;
     const driftX = Math.cos(idle * 0.82) * metric.floatRange * 0.54;
     const focusBoost = Math.max(0, 1 - Math.abs(metric.page.index - focusIndex) / 2.4);
-    const approach = this.clamp((depth + 2600) / 3200);
-    const afterPass = this.clamp((2200 - depth) / 1400);
+    const approach = this.isMobile ? this.clamp((depth + 2100) / 2800) : this.clamp((depth + 2600) / 3200);
+    const afterPass = this.isMobile ? this.clamp((1500 - depth) / 1200) : this.clamp((2200 - depth) / 1400);
     const brightness = approach * afterPass;
-    const scale = metric.scale + focusBoost * 0.2;
+    const isFeatureCard = metric.card.classList.contains("SpaceCard--feature");
+    const isPortraitCard = metric.card.classList.contains("SpaceCard--portrait");
+    const mobileBaseScale = isFeatureCard ? 0.42 : isPortraitCard ? 0.48 : 0.58;
+    const scale = this.isMobile ? mobileBaseScale + focusBoost * 0.12 + brightness * 0.28 : metric.scale + focusBoost * 0.2;
     return {
       transform: `translate3d(${metric.xFactor * window.innerWidth + driftX}px, ${
         metric.yFactor * window.innerHeight + drift
@@ -924,6 +955,7 @@ export default class Manager extends Views {
   }
 
   getPanelTransform(metric) {
+    if (this.isMobile) return this.getMobilePanelTransform(metric);
     const nearSuppression = this.clamp((0.5 - this.progress) / 0.18);
     const phase = this.clamp((this.progress - metric.start) / Math.max(metric.end - metric.start, 0.001));
     const eased = phase < 0.5 ? 2 * phase * phase : 1 - Math.pow(-2 * phase + 2, 2) / 2;
@@ -944,6 +976,33 @@ export default class Manager extends Views {
         metric.rx * (1 - eased) - 5 * exit
       }deg) rotateY(${metric.ry * (1 - eased) + metric.ry * 0.45 * exit + idle * 1.4}deg) rotateZ(${
         metric.rz * (1 - eased) + metric.rz * 1.15 * exit + idle * 0.8
+      }deg) scale(${scale})`,
+    };
+  }
+
+  getMobilePanelTransform(metric) {
+    const start = 0.39 + metric.index * 0.135;
+    const end = start + 0.145;
+    const phase = this.clamp((this.progress - start) / Math.max(end - start, 0.001));
+    const eased = phase < 0.5 ? 2 * phase * phase : 1 - Math.pow(-2 * phase + 2, 2) / 2;
+    const exit = this.clamp((this.progress - end) / 0.105);
+    const side = metric.index % 2 === 0 ? -1 : 1;
+    const idle = Math.sin(this.sceneTime * 0.72 + metric.index * 1.8);
+    const x = side * (window.innerWidth * 0.52 + metric.index * 8) * (1 - eased) + side * 18 * eased - side * window.innerWidth * 0.72 * exit;
+    const y = (-8 + metric.index * 4) * (1 - eased) + (metric.index % 2 === 0 ? -2 : 2) * eased + idle * 1.8;
+    const z = -1500 * (1 - eased) + 120 * eased - 850 * exit + idle * 28;
+    const scale = Math.max(0.56, 0.32 + eased * 0.54 - exit * 0.18);
+    const approachLight = this.clamp(phase * 1.9) * this.clamp(1 - exit * 1.25);
+    const opacity = this.clamp(phase * 3.6) * this.clamp(1 - exit * 2.4);
+    return {
+      approachLight,
+      opacity,
+      phase,
+      exit,
+      transform: `translate3d(calc(-50% + ${x}px), calc(-50% + ${y}vh), ${z}px) rotateX(${
+        metric.rx * 0.36 * (1 - eased) - 3 * exit
+      }deg) rotateY(${metric.ry * 0.42 * (1 - eased) + side * 3 * exit + idle * 0.7}deg) rotateZ(${
+        metric.rz * 0.28 * (1 - eased) + side * 4 * exit + idle * 0.45
       }deg) scale(${scale})`,
     };
   }
@@ -1050,15 +1109,17 @@ export default class Manager extends Views {
     this.syncStageMeta();
 
     if (this.DOM.aboutSheet) {
-      const aboutSheetIntro = this.clamp((this.progress - 0.055) / 0.055);
-      const aboutSheetTravel = this.clamp((this.progress - 0.055) / 0.36);
-      const aboutSheetExit = this.clamp((this.progress - 0.48) / 0.08);
+      const aboutSheetIntro = this.isMobile ? this.clamp((this.progress - 0.24) / 0.06) : this.clamp((this.progress - 0.055) / 0.055);
+      const aboutSheetTravel = this.isMobile ? this.clamp((this.progress - 0.3) / 0.2) : this.clamp((this.progress - 0.055) / 0.36);
+      const aboutSheetExit = this.isMobile ? this.clamp((this.progress - 0.44) / 0.08) : this.clamp((this.progress - 0.48) / 0.08);
       const aboutSheetOpacity = aboutSheetIntro * this.clamp(1 - aboutSheetExit * 1.1);
+      const aboutSheetY = this.isMobile ? 18 - aboutSheetTravel * 24 - aboutSheetExit * 22 : 112 - aboutSheetTravel * 142 - aboutSheetExit * 18;
+      const aboutSheetZ = this.isMobile ? 180 + aboutSheetExit * 780 : 120 + aboutSheetExit * 1100;
       this.DOM.aboutSheet.style.opacity = aboutSheetOpacity;
       this.DOM.aboutSheet.style.visibility = aboutSheetOpacity > 0.01 ? "visible" : "hidden";
-      this.DOM.aboutSheet.style.transform = `translate3d(-50%, ${112 - aboutSheetTravel * 142 - aboutSheetExit * 18}vh, ${
-        120 + aboutSheetExit * 1100
-      }px) rotateX(${aboutSheetExit * 18}deg) rotateZ(${-3 + this.progress * 4 + aboutSheetExit * 8}deg)`;
+      this.DOM.aboutSheet.style.transform = `translate3d(-50%, ${aboutSheetY}vh, ${aboutSheetZ}px) rotateX(${
+        aboutSheetExit * (this.isMobile ? 10 : 18)
+      }deg) rotateZ(${-3 + this.progress * 4 + aboutSheetExit * 8}deg)`;
     }
     if (this.DOM.aboutWord) {
       const aboutPhase = this.clamp((this.progress - 0.045) / 0.2);
@@ -1104,6 +1165,17 @@ export default class Manager extends Views {
 
     this.cardMetrics.forEach((metric) => {
       const { card, page } = metric;
+      if (this.isMobile && this.progress < 0.94) {
+        if (force || !metric.wasMobileIntroHidden) {
+          card.style.opacity = 0;
+          card.classList.toggle("is-focus", false);
+          this.setVisibilityClass(card, false);
+        }
+        metric.wasMobileIntroHidden = true;
+        metric.wasInPreloadRange = false;
+        return;
+      }
+      metric.wasMobileIntroHidden = false;
       const pageDistance = Math.abs(page.index - focusIndex);
       const inPreloadRange = pageDistance <= ranges.preloadRange;
       if (!force && !inPreloadRange && !metric.wasInPreloadRange) {

@@ -1930,18 +1930,18 @@ main {
   }
 
   .SpaceCard {
-    width: 28rem;
-    height: 16rem;
+    width: 25rem;
+    height: 14.2rem;
   }
 
   .SpaceCard--feature {
-    width: 48rem;
-    height: 27rem;
+    width: 38rem;
+    height: 21.4rem;
   }
 
   .SpaceCard--portrait {
-    width: 32rem;
-    height: 50rem;
+    width: 25rem;
+    height: 39rem;
   }
 
   .AboutWord {
@@ -1957,17 +1957,17 @@ main {
   }
 
   .FeaturePanel {
-    width: 82vw;
+    width: 72vw;
     min-width: 0;
     padding: 0.8rem;
   }
 
   .FeaturePanel__meta {
-    font-size: 2rem;
+    font-size: 1.75rem;
   }
 
   .FeaturePanel__caption {
-    font-size: 1.8rem;
+    font-size: 1.55rem;
   }
 
   .Sheet {
@@ -2223,6 +2223,34 @@ main {
 
   .GRBPortfolio.is-mobile-mode .SpaceStage {
     pointer-events: none;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard {
+    width: 25rem;
+    height: 14.2rem;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard--feature {
+    width: 38rem;
+    height: 21.4rem;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard--portrait {
+    width: 25rem;
+    height: 39rem;
+  }
+
+  .GRBPortfolio.is-mobile-mode .FeaturePanel {
+    width: 72vw;
+    max-width: 32rem;
+  }
+
+  .GRBPortfolio.is-mobile-mode .FeaturePanel__meta {
+    font-size: 1.75rem;
+  }
+
+  .GRBPortfolio.is-mobile-mode .FeaturePanel__caption {
+    font-size: 1.55rem;
   }
 
   .GRBPortfolio.is-mobile-mode .SpaceCard,
