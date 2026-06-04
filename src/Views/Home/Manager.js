@@ -398,7 +398,12 @@ export default class Manager extends Views {
     if (this.mobileScrollRaf) return;
     this.mobileScrollRaf = window.requestAnimationFrame(() => {
       this.mobileScrollRaf = null;
-      this.updateScene(true);
+      this.updateTargetProgress();
+      const progress = this.targetProgress;
+      this.DOM.root?.style.setProperty("--scene-progress", `${progress}`);
+      if (this.DOM.scrollProgress) {
+        this.DOM.scrollProgress.style.transform = `scaleX(${progress})`;
+      }
     });
   }
 
@@ -442,7 +447,7 @@ export default class Manager extends Views {
     this.DOM.root?.classList.add("is-mobile-mode");
     this.addEvent(window, "scroll", this.scrollHandler, { passive: true }, "mobileEvents");
     this.addEvent(this.DOM.detail, "scroll", this.detailScrollHandler, { passive: true }, "mobileEvents");
-    this.addEvent(this.DOM.spaceStage, "click", this.mobileStageClickHandler, undefined, "mobileEvents");
+    this.addEvent(document, "click", this.mobileStageClickHandler, true, "mobileEvents");
     this.updateScene(true);
   }
 
@@ -565,6 +570,8 @@ export default class Manager extends Views {
     if (event.target.closest("button, a")) return;
 
     const point = { x: event.clientX, y: event.clientY };
+    const stageRect = this.DOM.spaceStage?.getBoundingClientRect();
+    if (!stageRect || point.x < stageRect.left || point.x > stageRect.right || point.y < stageRect.top || point.y > stageRect.bottom) return;
     const candidates = [...this.featurePanels, ...this.nearPanels, ...this.cards]
       .map((element, index) => {
         const rect = element.getBoundingClientRect();
@@ -580,7 +587,7 @@ export default class Manager extends Views {
           area: rect.width * rect.height,
         };
       })
-      .filter((item) => item.contains && item.pointerEvents !== "none" && item.opacity > 0.12 && item.area > 1)
+      .filter((item) => item.contains && item.opacity > 0.12 && item.area > 1)
       .sort((a, b) => {
         const aFeature = a.element.classList.contains("FeaturePanel") ? 1 : 0;
         const bFeature = b.element.classList.contains("FeaturePanel") ? 1 : 0;
@@ -1498,7 +1505,10 @@ export default class Manager extends Views {
     if (this.DOM.detail) this.DOM.detail.style.overflowY = "";
     this.cancelGalleryAppend();
     window.clearTimeout(this.detailBottomUnlockTimer);
-    if (this.isMobile) window.scrollTo({ top: 0, behavior: "auto" });
+    if (this.isMobile) {
+      window.scrollTo({ top: 0, behavior: "auto" });
+      this.updateScene(true);
+    }
   }
 
   revealGallery() {
@@ -1587,7 +1597,12 @@ export default class Manager extends Views {
     if (this.isMobile) {
       this.sceneTime += 0.016;
       this.mobileFrame = (this.mobileFrame + 1) % 2;
-      if (this.mobileFrame === 0 && this.isEntered && !this.DOM.root.classList.contains("is-contact-open")) {
+      if (
+        this.mobileFrame === 0 &&
+        this.isEntered &&
+        !this.DOM.root.classList.contains("is-detail-open") &&
+        !this.DOM.root.classList.contains("is-contact-open")
+      ) {
         this.updateScene(false);
       }
       return;

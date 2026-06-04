@@ -2212,6 +2212,16 @@ main {
     touch-action: pan-y;
   }
 
+  .GRBPortfolio.is-mobile-mode .SpaceStage {
+    pointer-events: none;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard,
+  .GRBPortfolio.is-mobile-mode .NearPanel,
+  .GRBPortfolio.is-mobile-mode .FeaturePanel {
+    pointer-events: none;
+  }
+
   .SpaceCard,
   .FeaturePanel,
   .GalleryItem,
