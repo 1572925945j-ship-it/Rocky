@@ -875,6 +875,13 @@ main {
   will-change: transform, opacity;
 }
 
+.GRBPortfolio.is-desktop-mode .SpaceCard:not(.is-visible) img,
+.GRBPortfolio.is-desktop-mode .NearPanel:not(.is-visible) img,
+.GRBPortfolio.is-desktop-mode .FeaturePanel:not(.is-visible) img,
+.GRBPortfolio.is-desktop-mode .SpaceDust__dot:not(.is-visible) {
+  animation-play-state: paused;
+}
+
 .FeaturePanel:before {
   content: "";
   position: absolute;

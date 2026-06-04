@@ -2,7 +2,7 @@ import GSAP from "gsap";
 import Views from "../../../lib/Routing/Views";
 import { Route } from "./Config";
 import { portfolioPages, projects } from "./Data";
-import { createOptimizedImageHTML, getStageImage, resolveAssetUrl } from "./ImageUtils";
+import { buildSrcSet, createOptimizedImageHTML, getImageEntry, getStageImage, resolveAssetUrl } from "./ImageUtils";
 
 const isMobileViewport = () => {
   if (typeof window === "undefined") return false;
@@ -113,6 +113,8 @@ export default class Manager extends Views {
     this.detailTouchStartY = 0;
     this.detailTouchLastY = 0;
     this.preloadedStageImages = new Set();
+    this.desktopPreloadTimers = [];
+    this.desktopPreloadScheduled = false;
     this.lastCameraTransform = "";
   }
 
@@ -172,6 +174,64 @@ export default class Manager extends Views {
     link.href = href;
     link.fetchPriority = priority;
     document.head.appendChild(link);
+  }
+
+  preloadResponsiveImage(src, { priority = "low", sizes = "92vw", maxWidth = 1920 } = {}) {
+    const entry = getImageEntry(src);
+    if (!entry) {
+      this.preloadImage(src, priority);
+      return;
+    }
+
+    const srcSet = buildSrcSet(entry, "avif", maxWidth) || buildSrcSet(entry, "webp", maxWidth) || buildSrcSet(entry, "jpeg", maxWidth);
+    const href = resolveAssetUrl(entry.stage?.src || entry.fallback?.src || src);
+    const key = `${href}|${srcSet}|${sizes}`;
+    if (!href || this.preloadedStageImages.has(key)) return;
+    this.preloadedStageImages.add(key);
+
+    const link = document.createElement("link");
+    link.rel = "preload";
+    link.as = "image";
+    link.href = href;
+    link.fetchPriority = priority;
+    if (srcSet) {
+      link.setAttribute("imagesrcset", srcSet);
+      link.setAttribute("imagesizes", sizes);
+    }
+    document.head.appendChild(link);
+  }
+
+  clearDesktopPreloadTimers() {
+    this.desktopPreloadTimers.forEach((timer) => window.clearTimeout(timer));
+    this.desktopPreloadTimers = [];
+  }
+
+  scheduleDesktopImageWarmup() {
+    if (this.isMobile || this.desktopPreloadScheduled) return;
+    this.desktopPreloadScheduled = true;
+    this.clearDesktopPreloadTimers();
+
+    const detailProjectTitles = new Set(this.detailProjectSequence);
+    const showcaseImages = projects
+      .filter((project) => detailProjectTitles.has(project.title))
+      .map((project) => ({ src: project.image, sizes: "46vw", maxWidth: 1920 }));
+    const nearThumbs = ["04", "05", "10", "18", "26", "02", "29", "32"]
+      .map((number) => this.pageByNumber.get(number)?.thumb)
+      .filter(Boolean)
+      .map((src) => ({ src, sizes: "25vw", maxWidth: 768, thumb: true }));
+    const firstDetailPages = ["04", "05", "06", "10", "18", "26"]
+      .map((number) => this.pageByNumber.get(number)?.src)
+      .filter(Boolean)
+      .map((src) => ({ src, sizes: "92vw", maxWidth: 1920 }));
+
+    [...showcaseImages, ...nearThumbs, ...firstDetailPages].forEach((item, index) => {
+      const timer = window.setTimeout(() => {
+        if (this.isMobile) return;
+        if (item.thumb) this.preloadImage(item.src, "low");
+        else this.preloadResponsiveImage(item.src, { priority: "low", sizes: item.sizes, maxWidth: item.maxWidth });
+      }, 450 + index * 180);
+      this.desktopPreloadTimers.push(timer);
+    });
   }
 
   preloadInitialImages() {
@@ -317,6 +377,7 @@ export default class Manager extends Views {
       .fromTo(".CenterTitle", { scale: 0.94, autoAlpha: 0, y: 10 }, { scale: 1, autoAlpha: 0, y: 0, duration: 0.8, ease: "expo.out" }, 0.66)
       .to(this.DOM.header, { autoAlpha: 1, y: 0, duration: 0.8, ease: "expo.out" }, 0.72);
     this.updateScene(true);
+    this.scheduleDesktopImageWarmup();
   }
 
   bindEvents() {
@@ -447,6 +508,7 @@ export default class Manager extends Views {
 
   teardownDesktopMode() {
     this.removeEvents("desktopEvents");
+    this.clearDesktopPreloadTimers();
     this.dragState = null;
     this.swallowNextClick = false;
     if (this.mode === "desktop") this.mode = null;
@@ -1259,7 +1321,36 @@ export default class Manager extends Views {
   }
 
   setVisibilityClass(element, isVisible) {
-    element.classList.toggle("is-visible", Boolean(isVisible));
+    const visible = Boolean(isVisible);
+    if (!this.isMobile && element.__grbVisible === visible) return;
+    if (!this.isMobile) element.__grbVisible = visible;
+    element.classList.toggle("is-visible", visible);
+  }
+
+  setStyleValue(element, property, value) {
+    if (!element) return;
+    if (!this.isMobile) {
+      const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
+      if (cache[property] === value) return;
+      cache[property] = value;
+    }
+    element.style[property] = value;
+  }
+
+  setCssProperty(element, property, value) {
+    if (!element) return;
+    if (!this.isMobile) {
+      const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
+      if (cache[property] === value) return;
+      cache[property] = value;
+    }
+    element.style.setProperty(property, value);
+  }
+
+  shouldSkipDustMetric(metric, ranges, force = false) {
+    if (this.isMobile || force || metric.wasVisible) return false;
+    const roughZ = metric.z + this.progress * 9800;
+    return roughZ < -7900 || roughZ > ranges.dustDepthRange + 1400;
   }
 
   updateScene(force = false) {
@@ -1384,11 +1475,11 @@ export default class Manager extends Views {
       const hiddenOpacity = 0.04 + next.brightness * 0.14;
       const cardOpacity = isShown ? shownOpacity : hiddenOpacity;
       const isVisible = inPreloadRange && cardOpacity > 0.01 && Math.abs(next.depth) < 3600;
-      card.style.transform = next.transform;
-      card.style.opacity = cardOpacity;
-      card.style.filter = `brightness(${0.72 + next.brightness * 0.62}) saturate(${
+      this.setStyleValue(card, "transform", next.transform);
+      this.setStyleValue(card, "opacity", `${cardOpacity}`);
+      this.setStyleValue(card, "filter", `brightness(${0.72 + next.brightness * 0.62}) saturate(${
         0.86 + next.brightness * 0.28
-      }) contrast(${0.96 + next.brightness * 0.12})`;
+      }) contrast(${0.96 + next.brightness * 0.12})`);
       card.classList.toggle("is-focus", next.focus);
       card.classList.toggle("is-hidden", !isShown);
       this.setVisibilityClass(card, isVisible);
@@ -1397,10 +1488,11 @@ export default class Manager extends Views {
 
     this.dustMetrics.forEach((metric) => {
       if (this.isMobile && !force && metric.index % 2 !== this.mobileDustPhase) return;
+      if (this.shouldSkipDustMetric(metric, ranges, force)) return;
       const next = this.getDustTransform(metric);
       if (!this.shouldUpdateByOpacity(metric, next.opacity, force)) return;
-      metric.dot.style.transform = next.transform;
-      metric.dot.style.opacity = next.opacity;
+      this.setStyleValue(metric.dot, "transform", next.transform);
+      this.setStyleValue(metric.dot, "opacity", `${next.opacity}`);
       this.setVisibilityClass(metric.dot, next.opacity > 0.01 && Math.abs(next.z) < ranges.dustDepthRange);
     });
 
@@ -1409,9 +1501,9 @@ export default class Manager extends Views {
       const next = this.getNearTransform(metric);
       const panelOpacity = isShown ? next.opacity : next.opacity * 0.1;
       if (!this.shouldUpdateByOpacity(metric, panelOpacity, force)) return;
-      metric.panel.style.transform = next.transform;
-      metric.panel.style.opacity = panelOpacity;
-      metric.panel.style.pointerEvents = next.active && isShown ? "all" : "none";
+      this.setStyleValue(metric.panel, "transform", next.transform);
+      this.setStyleValue(metric.panel, "opacity", `${panelOpacity}`);
+      this.setStyleValue(metric.panel, "pointerEvents", next.active && isShown ? "all" : "none");
       this.setVisibilityClass(metric.panel, panelOpacity > 0.01 && Math.abs(next.depth) < 2400);
     });
 
@@ -1423,14 +1515,14 @@ export default class Manager extends Views {
       const panelOpacity = isShown ? next.opacity : next.opacity * 0.08;
       if (!this.shouldUpdateByOpacity(metric, panelOpacity, force)) return;
       const panelLight = next.approachLight;
-      metric.panel.style.transform = next.transform;
-      metric.panel.style.opacity = panelOpacity;
-      metric.panel.style.filter = `brightness(${0.78 + panelLight * 0.56}) saturate(${
+      this.setStyleValue(metric.panel, "transform", next.transform);
+      this.setStyleValue(metric.panel, "opacity", `${panelOpacity}`);
+      this.setStyleValue(metric.panel, "filter", `brightness(${0.78 + panelLight * 0.56}) saturate(${
         0.88 + panelLight * 0.22
-      }) contrast(${0.96 + panelLight * 0.12})`;
-      metric.panel.style.setProperty("--panel-image-brightness", `${0.82 + panelLight * 0.36}`);
-      metric.panel.style.setProperty("--panel-image-saturation", `${0.88 + panelLight * 0.2}`);
-      metric.panel.style.pointerEvents = next.opacity > 0.35 && isShown ? "all" : "none";
+      }) contrast(${0.96 + panelLight * 0.12})`);
+      this.setCssProperty(metric.panel, "--panel-image-brightness", `${0.82 + panelLight * 0.36}`);
+      this.setCssProperty(metric.panel, "--panel-image-saturation", `${0.88 + panelLight * 0.2}`);
+      this.setStyleValue(metric.panel, "pointerEvents", next.opacity > 0.35 && isShown ? "all" : "none");
       this.setVisibilityClass(metric.panel, panelOpacity > 0.01);
     });
   }
