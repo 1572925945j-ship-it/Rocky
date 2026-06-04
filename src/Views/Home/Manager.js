@@ -230,18 +230,6 @@ export default class Manager extends Views {
   }
 
   prepareLoader() {
-    if (this.isMobile) {
-      GSAP.set(this.DOM.header, { autoAlpha: 0, y: 0 });
-      GSAP.set(this.DOM.loader, { autoAlpha: 1 });
-      GSAP.set(this.DOM.aboutSheet, { autoAlpha: 0 });
-      GSAP.set(this.DOM.enter, { autoAlpha: 1, scale: 1, pointerEvents: "all" });
-      GSAP.set(this.DOM.percent, { yPercent: -130, opacity: 0 });
-      GSAP.set(".EnterButton__copy", { yPercent: 0 });
-      this.DOM.percent.textContent = 100;
-      this.DOM.enter.classList.add("is-ready");
-      return;
-    }
-
     GSAP.set(this.DOM.header, { autoAlpha: 0, y: 24 });
     GSAP.set(".CenterTitle", { autoAlpha: 0, scale: 0.94 });
     GSAP.set(this.DOM.aboutSheet, { autoAlpha: 0 });
@@ -279,20 +267,6 @@ export default class Manager extends Views {
     this.bottomProjectOpened = false;
     this.DOM.root.classList.add("is-entered");
     this.isEntered = true;
-    if (this.isMobile) {
-      this.resetMobileScene();
-      GSAP.to(this.DOM.loader, {
-        autoAlpha: 0,
-        duration: 0.24,
-        ease: "power1.out",
-        onComplete: () => {
-          if (this.DOM.loader) this.DOM.loader.style.pointerEvents = "none";
-        },
-      });
-      GSAP.to(this.DOM.header, { autoAlpha: 1, duration: 0.22, ease: "power1.out" });
-      return;
-    }
-
     GSAP.timeline()
       .to(this.DOM.enter, { scale: 0.42, rotate: -24, autoAlpha: 0, duration: 0.75, ease: "expo.inOut" }, 0)
       .to(".LoaderLocal__rings", { scale: 1.85, rotate: 44, autoAlpha: 0, duration: 1.28, ease: "expo.inOut" }, 0)
@@ -328,6 +302,7 @@ export default class Manager extends Views {
     this.dragMoveHandler = (event) => this.onDragMove(event);
     this.dragEndHandler = () => this.onDragEnd();
     this.clickCaptureHandler = (event) => this.onClickCapture(event);
+    this.mobileStageClickHandler = (event) => this.onMobileStageClick(event);
     this.detailCloseHandler = () => this.closeDetail();
     this.cursorOverHandler = (event) => this.onCursorOver(event);
     this.cursorOutHandler = (event) => this.onCursorOut(event);
@@ -429,7 +404,8 @@ export default class Manager extends Views {
     this.DOM.root?.classList.add("is-mobile-mode");
     this.addEvent(window, "scroll", this.scrollHandler, { passive: true }, "mobileEvents");
     this.addEvent(this.DOM.detail, "scroll", this.detailScrollHandler, { passive: true }, "mobileEvents");
-    this.resetMobileScene();
+    this.addEvent(this.DOM.spaceStage, "click", this.mobileStageClickHandler, undefined, "mobileEvents");
+    this.updateScene(true);
   }
 
   teardownMobileMode() {
@@ -480,8 +456,7 @@ export default class Manager extends Views {
     if (this.DOM.detailToplineCurrent) this.DOM.detailToplineCurrent.textContent = "01";
     const detailToplineText = this.DOM.detail?.querySelector(".DetailTopline span:last-child");
     if (detailToplineText) detailToplineText.textContent = "SCROLL GALLERY";
-    this.updateMobileListState();
-    this.updateMobileScene(true);
+    this.updateScene(true);
   }
 
   updateMobileScene(force = false) {
@@ -540,6 +515,48 @@ export default class Manager extends Views {
     }
     event.stopImmediatePropagation();
     this.swallowNextClick = false;
+  }
+
+  onMobileStageClick(event) {
+    if (!this.isMobile) return;
+    if (!this.isEntered || this.DOM.root.classList.contains("is-detail-open") || this.DOM.root.classList.contains("is-contact-open")) return;
+    if (event.target.closest("button, a")) return;
+
+    const point = { x: event.clientX, y: event.clientY };
+    const candidates = [...this.featurePanels, ...this.nearPanels, ...this.cards]
+      .map((element, index) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const contains = point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+        return {
+          element,
+          index,
+          rect,
+          contains,
+          opacity: Number(style.opacity || 0),
+          pointerEvents: style.pointerEvents,
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((item) => item.contains && item.pointerEvents !== "none" && item.opacity > 0.12 && item.area > 1)
+      .sort((a, b) => {
+        const aFeature = a.element.classList.contains("FeaturePanel") ? 1 : 0;
+        const bFeature = b.element.classList.contains("FeaturePanel") ? 1 : 0;
+        if (aFeature !== bFeature) return bFeature - aFeature;
+        return b.opacity - a.opacity;
+      });
+
+    const target = candidates[0]?.element;
+    if (!target) return;
+
+    const project = target.dataset.project ? projects.find((item) => item.title === target.dataset.project) : null;
+    if (project) {
+      this.openProject(project);
+      return;
+    }
+
+    const page = target.dataset.page ? this.pageByNumber.get(target.dataset.page) : null;
+    if (page) this.openPageDetail(page);
   }
 
   onDragStart(event) {
@@ -751,12 +768,6 @@ export default class Manager extends Views {
     this.activeFilter = filter;
     this.activeIndex = 0;
     this.updateFilterState(filter);
-    if (this.isMobile) {
-      this.updateMobileListState();
-      const firstVisibleCard = this.cards.find((card) => !card.classList.contains("is-hidden") && card.dataset.layer === "0");
-      firstVisibleCard?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
     this.jumpToFilter(filter);
     this.updateScene(true);
   }
@@ -810,13 +821,6 @@ export default class Manager extends Views {
   }
 
   jumpToFilter(filter) {
-    if (this.isMobile) {
-      this.updateMobileListState();
-      const firstVisibleCard = this.cards.find((card) => !card.classList.contains("is-hidden") && card.dataset.layer === "0");
-      firstVisibleCard?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-
     const progressByFilter = {
       all: 0.02,
       work: 0.66,
@@ -835,12 +839,6 @@ export default class Manager extends Views {
     if (!activePages.length) return;
     this.activeIndex = (this.activeIndex + direction + activePages.length) % activePages.length;
     const activePage = activePages[this.activeIndex];
-    if (this.isMobile) {
-      const targetCard = this.cards.find((card) => card.dataset.page === activePage.number && card.dataset.layer === "0");
-      targetCard?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-
     const target = activePage.index / Math.max(portfolioPages.length - 1, 1);
     window.scrollTo({
       top: target * this.getMaxScroll(),
@@ -1129,6 +1127,14 @@ export default class Manager extends Views {
     if (project.title === "BUSINESS") {
       const imageByNumber = new Map(images.map((image) => [image.pageNumber, image]));
       const cover = imageByNumber.get("04");
+      if (this.isMobile) {
+        const mobileSequence = ["05", "06", "07", "09", "08"].map((number) => imageByNumber.get(number)).filter(Boolean);
+        return `
+          ${cover ? renderItem(cover, 0) : ""}
+          ${mobileSequence.map((image, index) => renderItem(image, index + 1)).join("")}
+        `;
+      }
+
       const leftColumn = ["05", "07"].map((number) => imageByNumber.get(number)).filter(Boolean);
       const rightColumn = ["06", "09", "08"].map((number) => imageByNumber.get(number)).filter(Boolean);
 
@@ -1375,9 +1381,10 @@ export default class Manager extends Views {
     if (!this.DOM?.root) return;
     if (document.visibilityState === "hidden") return;
     if (this.isMobile) {
-      this.mobileFrame = (this.mobileFrame + 1) % 3;
+      this.sceneTime += 0.016;
+      this.mobileFrame = (this.mobileFrame + 1) % 2;
       if (this.mobileFrame === 0 && this.isEntered && !this.DOM.root.classList.contains("is-contact-open")) {
-        this.updateMobileScene(false);
+        this.updateScene(false);
       }
       return;
     }
@@ -1404,7 +1411,7 @@ export default class Manager extends Views {
   SIZES() {
     if (this.syncViewportMode()) return;
     if (this.isMobile) {
-      this.updateMobileScene(true);
+      this.updateScene(true);
       return;
     }
     this.updateScene(true);
