@@ -219,12 +219,12 @@ export default class Manager extends Views {
       panel,
       project,
       index,
-      start: 0.58 + index * 0.055,
-      end: 0.79 + index * 0.062,
+      start: 0.58 + index * 0.075,
+      end: 0.71 + index * 0.075,
       x: side * (260 + index * 70),
       y: index === 1 ? -16 : index === 2 ? 16 : 0,
       zStart: -4200 - index * 800,
-      zEnd: 720 + index * 210,
+      zEnd: 260,
       rx: index === 2 ? -18 : 12,
       ry: side * (24 + index * 8),
       rz: side * (-11 - index * 5),
@@ -1157,10 +1157,10 @@ export default class Manager extends Views {
     const x = metric.x * (1 - eased) + (metric.x * -0.18) * eased + (metric.index % 2 === 0 ? -560 : 560) * exit;
     const idle = Math.sin(this.sceneTime * 0.9 + metric.index * 1.8);
     const y = metric.y * (1 - eased) + (metric.index % 2 === 0 ? -4 : 6) * eased + (metric.index % 2 === 0 ? -12 : 14) * exit + idle * 2.5;
-    const z = metric.zStart * (1 - eased) + metric.zEnd * eased + 1600 * exit + idle * 70;
-    const scale = 0.42 + eased * 1.3 + exit * 0.56;
+    const z = metric.zStart * (1 - eased) + metric.zEnd * eased + 240 * exit + idle * 52;
+    const scale = 0.4 + eased * 0.82 - exit * 0.08;
     const approachLight = this.clamp(phase * 1.55) * this.clamp(1 - exit * 1.15);
-    const opacity = this.clamp(phase * 3.4) * this.clamp(1 - exit * 1.35) * (1 - nearSuppression * 0.58);
+    const opacity = this.clamp(phase * 3.4) * this.clamp(1 - exit * 2.2) * (1 - nearSuppression * 0.58);
     return {
       approachLight,
       opacity,
@@ -1221,15 +1221,16 @@ export default class Manager extends Views {
   getNearTransform(metric) {
     const timeline = Math.max(this.progress, this.targetProgress);
     const intro = this.clamp((this.progress - 0.55) / 0.1);
-    const pass = this.clamp((this.progress - 0.58) / 0.18);
-    const exit = this.clamp((timeline - 0.76) / 0.08);
+    const pass = this.clamp((this.progress - 0.58) / (this.isMobile ? 0.18 : 0.15));
+    const exit = this.clamp((timeline - (this.isMobile ? 0.76 : 0.675)) / (this.isMobile ? 0.08 : 0.075));
     const idle = this.sceneTime * 0.28 + metric.index;
-    const depth = metric.z + pass * 6100 + Math.sin(idle) * 95;
+    const depth = metric.z + pass * (this.isMobile ? 6100 : 4700) + Math.sin(idle) * 95;
     const tunnelCurve = Math.sin(metric.angle + pass * 5.2);
     const x = metric.x * (1 - pass * 0.55) + tunnelCurve * 360 + (this.mouse.x - 0.5) * 120;
     const y = metric.y * (1 - pass * 0.42) + Math.cos(metric.angle + pass * 3.4) * 210 + (this.mouse.y - 0.5) * 90;
     const nearBoost = this.clamp((depth + 900) / 1900);
-    const opacity = this.clamp(intro * 2.5) * this.clamp(1 - exit * 2.2) * this.clamp((2800 - depth) / 1300);
+    const opacity = this.clamp(intro * 2.5) * this.clamp(1 - exit * (this.isMobile ? 2.2 : 3.1)) * this.clamp((2800 - depth) / 1300);
+    const nearScaleBoost = this.isMobile ? 1.65 : 0.72;
     return {
       opacity,
       depth,
@@ -1237,7 +1238,7 @@ export default class Manager extends Views {
         metric.rx + pass * 22 - exit * 35
       }deg) rotateY(${metric.ry - tunnelCurve * 58 + pass * metric.side * 38}deg) rotateZ(${
         metric.rz + pass * 52 * metric.side
-      }deg) scale(${metric.scale + nearBoost * 1.65})`,
+      }deg) scale(${metric.scale + nearBoost * nearScaleBoost})`,
       active: opacity > 0.18 && depth > -1300 && depth < 1700,
     };
   }
@@ -1690,6 +1691,7 @@ export default class Manager extends Views {
     if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
+    this.DOM.detail.classList.toggle("is-business-detail", project.title === "BUSINESS");
     this.DOM.detail.setAttribute("aria-hidden", "false");
     this.setDetailHero({
       title: "",
@@ -1715,6 +1717,7 @@ export default class Manager extends Views {
     if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
+    this.DOM.detail.classList.toggle("is-business-detail", project.title === "BUSINESS");
     this.DOM.detail.setAttribute("aria-hidden", "false");
     this.setDetailHero({
       title: "",
@@ -1811,7 +1814,7 @@ export default class Manager extends Views {
   closeDetail() {
     if (!this.DOM?.root) return;
     this.DOM.root.classList.remove("is-detail-open");
-    this.DOM.detail?.classList.remove("is-gallery-only");
+    this.DOM.detail?.classList.remove("is-gallery-only", "is-business-detail");
     this.DOM.detail?.setAttribute("aria-hidden", "true");
     this.currentDetailProjectIndex = -1;
     this.detailBottomLocked = false;
