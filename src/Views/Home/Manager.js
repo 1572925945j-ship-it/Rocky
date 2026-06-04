@@ -115,6 +115,9 @@ export default class Manager extends Views {
     this.preloadedStageImages = new Set();
     this.desktopPreloadTimers = [];
     this.desktopPreloadScheduled = false;
+    this.mobilePreloadTimers = [];
+    this.mobileDetailPreloadTimers = [];
+    this.mobilePreloadScheduled = false;
     this.lastCameraTransform = "";
   }
 
@@ -204,6 +207,98 @@ export default class Manager extends Views {
   clearDesktopPreloadTimers() {
     this.desktopPreloadTimers.forEach((timer) => window.clearTimeout(timer));
     this.desktopPreloadTimers = [];
+  }
+
+  clearMobileDetailPreloadTimers() {
+    this.mobileDetailPreloadTimers.forEach((timer) => window.clearTimeout(timer));
+    this.mobileDetailPreloadTimers = [];
+  }
+
+  clearMobilePreloadTimers(resetScheduled = false) {
+    this.mobilePreloadTimers.forEach((timer) => window.clearTimeout(timer));
+    this.mobilePreloadTimers = [];
+    this.clearMobileDetailPreloadTimers();
+    if (resetScheduled) this.mobilePreloadScheduled = false;
+  }
+
+  queueMobileImageWarmup(items, { startDelay = 260, gap = 115, detail = false } = {}) {
+    if (!this.isMobile || !items.length) return;
+    const bucket = detail ? this.mobileDetailPreloadTimers : this.mobilePreloadTimers;
+    const seen = new Set();
+    items
+      .filter((item) => item?.src)
+      .filter((item) => {
+        const key = `${item.src}|${item.sizes || ""}|${item.thumb ? "thumb" : "responsive"}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .forEach((item, index) => {
+        const timer = window.setTimeout(() => {
+          if (!this.isMobile) return;
+          if (item.thumb) {
+            this.preloadImage(item.src, "low");
+            return;
+          }
+          this.preloadResponsiveImage(item.src, {
+            priority: "low",
+            sizes: item.sizes || "100vw",
+            maxWidth: item.maxWidth || 1920,
+          });
+        }, startDelay + index * gap);
+        bucket.push(timer);
+      });
+  }
+
+  getMobileDetailWarmupItems(project, selectedPage = null, limit = 5) {
+    if (!project) return [];
+    const { items } = this.getGalleryPlan(project, selectedPage);
+    return items.slice(0, limit).map(({ image }) => ({
+      src: image.src,
+      sizes: this.getGalleryImageSizes(image),
+      maxWidth: 1920,
+    }));
+  }
+
+  scheduleMobileImageWarmup() {
+    if (!this.isMobile || this.mobilePreloadScheduled) return;
+    this.mobilePreloadScheduled = true;
+
+    const detailProjectTitles = new Set(this.detailProjectSequence);
+    const showcaseImages = projects
+      .filter((project) => detailProjectTitles.has(project.title))
+      .map((project) => ({
+        src: project.image,
+        sizes: "(max-width: 768px) 82vw, 46vw",
+        maxWidth: 1920,
+      }));
+    const primaryThumbs = ["04", "05", "06", "07", "09", "08", "10", "18", "26", "02", "29", "32"]
+      .map((number) => this.pageByNumber.get(number)?.thumb)
+      .filter(Boolean)
+      .map((src) => ({ src, thumb: true }));
+    const firstDetailImages = this.detailProjectSequence
+      .map((title) => projects.find((project) => project.title === title))
+      .filter(Boolean)
+      .flatMap((project) => this.getMobileDetailWarmupItems(project, null, 3));
+
+    this.queueMobileImageWarmup([...showcaseImages, ...primaryThumbs, ...firstDetailImages], {
+      startDelay: 280,
+      gap: 105,
+    });
+  }
+
+  warmupMobileDetailImages(project, selectedPage = null) {
+    if (!this.isMobile || !project) return;
+    this.clearMobileDetailPreloadTimers();
+    const currentItems = this.getMobileDetailWarmupItems(project, selectedPage, 6);
+    const nextProjectTitle = this.detailProjectSequence[this.currentDetailProjectIndex + 1];
+    const nextProject = projects.find((item) => item.title === nextProjectTitle);
+    const nextItems = this.getMobileDetailWarmupItems(nextProject, null, 3);
+    this.queueMobileImageWarmup([...currentItems, ...nextItems], {
+      startDelay: 90,
+      gap: 85,
+      detail: true,
+    });
   }
 
   scheduleDesktopImageWarmup() {
@@ -377,7 +472,11 @@ export default class Manager extends Views {
       .fromTo(".CenterTitle", { scale: 0.94, autoAlpha: 0, y: 10 }, { scale: 1, autoAlpha: 0, y: 0, duration: 0.8, ease: "expo.out" }, 0.66)
       .to(this.DOM.header, { autoAlpha: 1, y: 0, duration: 0.8, ease: "expo.out" }, 0.72);
     this.updateScene(true);
-    this.scheduleDesktopImageWarmup();
+    if (this.isMobile) {
+      this.scheduleMobileImageWarmup();
+    } else {
+      this.scheduleDesktopImageWarmup();
+    }
   }
 
   bindEvents() {
@@ -477,9 +576,9 @@ export default class Manager extends Views {
       this.updateTargetProgress();
       this.checkMobileHomeBottom();
       const progress = this.targetProgress;
-      this.DOM.root?.style.setProperty("--scene-progress", `${progress}`);
+      this.setCssProperty(this.DOM.root, "--scene-progress", `${progress}`);
       if (this.DOM.scrollProgress) {
-        this.DOM.scrollProgress.style.transform = `scaleX(${progress})`;
+        this.setStyleValue(this.DOM.scrollProgress, "transform", `scaleX(${progress})`);
       }
     });
   }
@@ -532,11 +631,13 @@ export default class Manager extends Views {
     this.addEvent(this.DOM.detail, "touchcancel", this.detailTouchEndHandler, { passive: true }, "mobileEvents");
     this.addEvent(document, "click", this.mobileStageClickHandler, true, "mobileEvents");
     this.updateScene(true);
+    if (this.isEntered) this.scheduleMobileImageWarmup();
   }
 
   teardownMobileMode() {
     if (this.mode !== "mobile") return;
     this.removeEvents("mobileEvents");
+    this.clearMobilePreloadTimers(true);
     if (this.mobileScrollRaf) {
       window.cancelAnimationFrame(this.mobileScrollRaf);
       this.mobileScrollRaf = null;
@@ -607,15 +708,15 @@ export default class Manager extends Views {
 
     const viewportHeight = Math.max(1, window.innerHeight);
     const progress = this.targetProgress;
-    this.DOM.root.style.setProperty("--scene-progress", `${progress}`);
-    this.DOM.root.style.setProperty("--center-opacity", `${Math.max(0.18, 1 - progress * 1.2)}`);
+    this.setCssProperty(this.DOM.root, "--scene-progress", `${progress}`);
+    this.setCssProperty(this.DOM.root, "--center-opacity", `${Math.max(0.18, 1 - progress * 1.2)}`);
     if (this.DOM.scrollProgress) {
-      this.DOM.scrollProgress.style.transform = `scaleX(${progress})`;
+      this.setStyleValue(this.DOM.scrollProgress, "transform", `scaleX(${progress})`);
     }
 
     if (this.DOM.centerTitle && !this.DOM.root.classList.contains("is-detail-open")) {
       const titleShift = Math.max(-24, Math.min(16, -scrollY * 0.035));
-      this.DOM.centerTitle.style.transform = `translate3d(0, ${titleShift}px, 0)`;
+      this.setStyleValue(this.DOM.centerTitle, "transform", `translate3d(0, ${titleShift}px, 0)`);
     }
 
     const animateMobileItem = (element, index, strength = 1) => {
@@ -626,10 +727,10 @@ export default class Manager extends Views {
       const y = Math.max(-18, Math.min(18, centerOffset * -26 * strength));
       const scale = 0.975 + Math.max(0, 1 - Math.abs(centerOffset) * 1.4) * 0.025;
       const opacity = 0.72 + Math.max(0, 1 - Math.abs(centerOffset) * 1.5) * 0.28;
-      element.style.transform = `translate3d(0, ${y}px, 0) scale(${scale})`;
-      element.style.opacity = opacity;
-      element.classList.toggle("is-mobile-active", opacity > 0.88);
-      element.style.setProperty("--mobile-delay", `${Math.min(index, 8) * 0.035}s`);
+      this.setStyleValue(element, "transform", `translate3d(0, ${y}px, 0) scale(${scale})`);
+      this.setStyleValue(element, "opacity", `${opacity}`);
+      this.setClassState(element, "is-mobile-active", opacity > 0.88);
+      this.setCssProperty(element, "--mobile-delay", `${Math.min(index, 8) * 0.035}s`);
     };
 
     this.featurePanels.forEach((panel, index) => animateMobileItem(panel, index, 0.8));
@@ -1109,13 +1210,13 @@ export default class Manager extends Views {
     this.cards.forEach((card) => {
       const matchesFilter = this.activeFilter === "all" || card.dataset.type === this.activeFilter;
       const isPrimaryLayer = card.dataset.layer === "0";
-      card.classList.toggle("is-hidden", !matchesFilter || !isPrimaryLayer);
+      this.setClassState(card, "is-hidden", !matchesFilter || !isPrimaryLayer);
     });
     this.nearPanels.forEach((panel) => {
-      panel.classList.toggle("is-hidden", true);
+      this.setClassState(panel, "is-hidden", true);
     });
     this.featurePanels.forEach((panel) => {
-      panel.classList.remove("is-hidden");
+      this.setClassState(panel, "is-hidden", false);
     });
   }
 
@@ -1323,28 +1424,58 @@ export default class Manager extends Views {
   setVisibilityClass(element, isVisible) {
     const visible = Boolean(isVisible);
     if (!this.isMobile && element.__grbVisible === visible) return;
-    if (!this.isMobile) element.__grbVisible = visible;
+    if (this.isMobile) {
+      const current = element.classList.contains("is-visible");
+      if (element.__grbVisible === visible && current === visible) return;
+    }
+    element.__grbVisible = visible;
     element.classList.toggle("is-visible", visible);
+  }
+
+  setClassState(element, className, enabled) {
+    if (!element) return;
+    const active = Boolean(enabled);
+    if (!this.isMobile) {
+      element.classList.toggle(className, active);
+      return;
+    }
+    const cache = element.__grbClassCache || (element.__grbClassCache = {});
+    const current = element.classList.contains(className);
+    if (cache[className] === active && current === active) return;
+    cache[className] = active;
+    element.classList.toggle(className, active);
   }
 
   setStyleValue(element, property, value) {
     if (!element) return;
+    const nextValue = String(value);
     if (!this.isMobile) {
       const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
       if (cache[property] === value) return;
       cache[property] = value;
+      element.style[property] = value;
+      return;
     }
-    element.style[property] = value;
+    const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
+    if (cache[property] === nextValue && element.style[property] === nextValue) return;
+    cache[property] = nextValue;
+    element.style[property] = nextValue;
   }
 
   setCssProperty(element, property, value) {
     if (!element) return;
+    const nextValue = String(value);
     if (!this.isMobile) {
       const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
       if (cache[property] === value) return;
       cache[property] = value;
+      element.style.setProperty(property, value);
+      return;
     }
-    element.style.setProperty(property, value);
+    const cache = element.__grbStyleCache || (element.__grbStyleCache = {});
+    if (cache[property] === nextValue && element.style.getPropertyValue(property) === nextValue) return;
+    cache[property] = nextValue;
+    element.style.setProperty(property, nextValue);
   }
 
   shouldSkipDustMetric(metric, ranges, force = false) {
@@ -1373,24 +1504,24 @@ export default class Manager extends Views {
     if (this.DOM.spaceCamera) {
       const cameraTransform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
       if (force || cameraTransform !== this.lastCameraTransform) {
-        this.DOM.spaceCamera.style.transform = cameraTransform;
+        this.setStyleValue(this.DOM.spaceCamera, "transform", cameraTransform);
         this.lastCameraTransform = cameraTransform;
       }
     }
-    this.DOM.root.style.setProperty("--title-x", `${tiltX * 0.8}deg`);
-    this.DOM.root.style.setProperty("--title-y", `${tiltY * 0.8}deg`);
-    this.DOM.root.style.setProperty("--scene-progress", `${Math.max(this.progress, this.targetProgress)}`);
+    this.setCssProperty(this.DOM.root, "--title-x", `${tiltX * 0.8}deg`);
+    this.setCssProperty(this.DOM.root, "--title-y", `${tiltY * 0.8}deg`);
+    this.setCssProperty(this.DOM.root, "--scene-progress", `${Math.max(this.progress, this.targetProgress)}`);
     if (this.DOM.scrollProgress) {
-      this.DOM.scrollProgress.style.transform = `scaleX(${Math.max(this.progress, this.targetProgress)})`;
+      this.setStyleValue(this.DOM.scrollProgress, "transform", `scaleX(${Math.max(this.progress, this.targetProgress)})`);
     }
     const visibleProgress = Math.max(this.progress, this.targetProgress);
     const titleIntro = this.clamp((visibleProgress - 0.035) / 0.055);
     const titleExit = this.clamp((visibleProgress - 0.58) / 0.12);
     const centerOpacity = titleIntro * this.clamp(1 - titleExit) * 0.95;
-    this.DOM.root.style.setProperty("--center-opacity", `${centerOpacity}`);
+    this.setCssProperty(this.DOM.root, "--center-opacity", `${centerOpacity}`);
     if (this.DOM.centerTitle) {
-      this.DOM.centerTitle.style.opacity = centerOpacity;
-      this.DOM.centerTitle.style.visibility = centerOpacity > 0.01 ? "visible" : "hidden";
+      this.setStyleValue(this.DOM.centerTitle, "opacity", `${centerOpacity}`);
+      this.setStyleValue(this.DOM.centerTitle, "visibility", centerOpacity > 0.01 ? "visible" : "hidden");
     }
     this.syncFilterWithProgress();
     this.syncStageMeta();
@@ -1402,60 +1533,60 @@ export default class Manager extends Views {
       const aboutSheetOpacity = aboutSheetIntro * this.clamp(1 - aboutSheetExit * 1.1);
       const aboutSheetY = this.isMobile ? 18 - aboutSheetTravel * 24 - aboutSheetExit * 22 : 112 - aboutSheetTravel * 142 - aboutSheetExit * 18;
       const aboutSheetZ = this.isMobile ? 180 + aboutSheetExit * 780 : 120 + aboutSheetExit * 1100;
-      this.DOM.aboutSheet.style.opacity = aboutSheetOpacity;
-      this.DOM.aboutSheet.style.visibility = aboutSheetOpacity > 0.01 ? "visible" : "hidden";
-      this.DOM.aboutSheet.style.transform = `translate3d(-50%, ${aboutSheetY}vh, ${aboutSheetZ}px) rotateX(${
+      this.setStyleValue(this.DOM.aboutSheet, "opacity", `${aboutSheetOpacity}`);
+      this.setStyleValue(this.DOM.aboutSheet, "visibility", aboutSheetOpacity > 0.01 ? "visible" : "hidden");
+      this.setStyleValue(this.DOM.aboutSheet, "transform", `translate3d(-50%, ${aboutSheetY}vh, ${aboutSheetZ}px) rotateX(${
         aboutSheetExit * (this.isMobile ? 10 : 18)
-      }deg) rotateZ(${-3 + this.progress * 4 + aboutSheetExit * 8}deg)`;
+      }deg) rotateZ(${-3 + this.progress * 4 + aboutSheetExit * 8}deg)`);
     }
     if (this.DOM.aboutWord) {
       const aboutPhase = this.clamp((this.progress - 0.045) / 0.2);
       const aboutExit = this.clamp((this.progress - 0.24) / 0.13);
       const aboutOpacity = this.clamp(aboutPhase * 2.4) * this.clamp(1 - aboutExit * 1.7);
       const aboutIdle = Math.sin(this.sceneTime * 0.8) * 2;
-      this.DOM.aboutWord.style.opacity = aboutOpacity;
-      this.DOM.aboutWord.style.transform = `translate3d(-50%, calc(-50% + ${44 - aboutPhase * 42 - aboutExit * 20}vh), ${
+      this.setStyleValue(this.DOM.aboutWord, "opacity", `${aboutOpacity}`);
+      this.setStyleValue(this.DOM.aboutWord, "transform", `translate3d(-50%, calc(-50% + ${44 - aboutPhase * 42 - aboutExit * 20}vh), ${
         -1400 + aboutPhase * 2200 + aboutExit * 900
       }px) rotateX(${10 - aboutPhase * 14 + aboutIdle}deg) rotateY(${22 - aboutPhase * 18}deg) rotateZ(${
         18 - aboutPhase * 28 - aboutIdle
-      }deg)`;
+      }deg)`);
     }
     if (this.DOM.worksSheet) {
-      this.DOM.worksSheet.style.transform = `translate3d(-50%, ${150 - this.progress * 155}vh, 90px) rotateZ(${
+      this.setStyleValue(this.DOM.worksSheet, "transform", `translate3d(-50%, ${150 - this.progress * 155}vh, 90px) rotateZ(${
         4 - this.progress * 5
-      }deg)`;
+      }deg)`);
     }
     if (this.DOM.workWord) {
       const workPhase = this.clamp((this.progress - 0.62) / 0.12);
       const workExit = this.clamp((this.progress - 0.78) / 0.08);
       const workOpacity = this.clamp(workPhase * 2) * this.clamp(1 - workExit * 2.2);
       const workIdle = Math.sin(this.sceneTime * 0.72) * 2.5;
-      this.DOM.workWord.style.opacity = workExit > 0.96 ? 0 : workOpacity;
-      this.DOM.workWord.style.transform = `translate3d(-50%, calc(-50% + ${47 - workPhase * 36 - workExit * 38}vh), ${
+      this.setStyleValue(this.DOM.workWord, "opacity", `${workExit > 0.96 ? 0 : workOpacity}`);
+      this.setStyleValue(this.DOM.workWord, "transform", `translate3d(-50%, calc(-50% + ${47 - workPhase * 36 - workExit * 38}vh), ${
         -1800 + workPhase * 2500 + workExit * 1150
       }px) rotateX(${8 - workPhase * 8 + workIdle}deg) rotateY(${-28 + workPhase * 16}deg) rotateZ(${
         -24 + workPhase * 37 + workExit * 22 - workIdle
-      }deg)`;
+      }deg)`);
     }
     if (this.DOM.labWord) {
       const labPhase = this.clamp((this.progress - 0.94) / 0.06);
       const labExit = this.clamp((this.progress - 0.86) / 0.12);
       const labOpacity = this.clamp(labPhase * 2.2) * this.clamp(1 - labExit * 1.6);
       const labIdle = Math.sin(this.sceneTime * 0.82) * 3;
-      this.DOM.labWord.style.opacity = labOpacity;
-      this.DOM.labWord.style.transform = `translate3d(-50%, calc(-50% + ${28 - labPhase * 44 - labExit * 24}vh), ${
+      this.setStyleValue(this.DOM.labWord, "opacity", `${labOpacity}`);
+      this.setStyleValue(this.DOM.labWord, "transform", `translate3d(-50%, calc(-50% + ${28 - labPhase * 44 - labExit * 24}vh), ${
         -1600 + labPhase * 2500 + labExit * 850
       }px) rotateX(${14 - labPhase * 18 + labIdle}deg) rotateY(${32 - labPhase * 30}deg) rotateZ(${
         20 - labPhase * 42 + labExit * 12 - labIdle
-      }deg)`;
+      }deg)`);
     }
 
     this.cardMetrics.forEach((metric) => {
       const { card, page } = metric;
       if (this.isMobile && this.progress < 0.94) {
         if (force || !metric.wasMobileIntroHidden) {
-          card.style.opacity = 0;
-          card.classList.toggle("is-focus", false);
+          this.setStyleValue(card, "opacity", "0");
+          this.setClassState(card, "is-focus", false);
           this.setVisibilityClass(card, false);
         }
         metric.wasMobileIntroHidden = true;
@@ -1480,8 +1611,8 @@ export default class Manager extends Views {
       this.setStyleValue(card, "filter", `brightness(${0.72 + next.brightness * 0.62}) saturate(${
         0.86 + next.brightness * 0.28
       }) contrast(${0.96 + next.brightness * 0.12})`);
-      card.classList.toggle("is-focus", next.focus);
-      card.classList.toggle("is-hidden", !isShown);
+      this.setClassState(card, "is-focus", next.focus);
+      this.setClassState(card, "is-hidden", !isShown);
       this.setVisibilityClass(card, isVisible);
       metric.wasInPreloadRange = inPreloadRange;
     });
@@ -1793,6 +1924,7 @@ export default class Manager extends Views {
       project,
     });
     this.setDetailGallery(project);
+    this.warmupMobileDetailImages(project);
     this.DOM.detail.scrollTo({ top: 0, behavior: "instant" });
     this.lastDetailScrollTop = 0;
     this.revealDetailHero();
@@ -1819,6 +1951,7 @@ export default class Manager extends Views {
       project,
     });
     this.setDetailGallery(project, page);
+    this.warmupMobileDetailImages(project, page);
     this.DOM.detail.scrollTo({ top: 0, behavior: "instant" });
     this.lastDetailScrollTop = 0;
     this.revealDetailHero();
