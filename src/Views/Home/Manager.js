@@ -87,6 +87,7 @@ export default class Manager extends Views {
     this.detailBottomReadyAt = 0;
     this.detailBottomIntent = 0;
     this.detailBottomIntentAt = 0;
+    this.detailTopReadyAt = 0;
     this.currentStageLabel = "";
     this.isMobile = isMobileViewport();
     this.mode = null;
@@ -105,6 +106,12 @@ export default class Manager extends Views {
     this.galleryAppendToken = 0;
     this.galleryIdleHandle = null;
     this.galleryTimeoutHandle = null;
+    this.detailGalleryIsAppending = false;
+    this.detailTopCheckTimer = null;
+    this.detailBottomCheckTimer = null;
+    this.detailPinToBottomUntil = 0;
+    this.detailTouchStartY = 0;
+    this.detailTouchLastY = 0;
     this.preloadedStageImages = new Set();
     this.lastCameraTransform = "";
   }
@@ -134,6 +141,8 @@ export default class Manager extends Views {
     this.teardownMobileMode();
     this.cancelGalleryAppend();
     window.clearTimeout(this.detailBottomUnlockTimer);
+    window.clearTimeout(this.detailTopCheckTimer);
+    window.clearTimeout(this.detailBottomCheckTimer);
     this.animation = GSAP.timeline({
       onStart: NextShow,
       onComplete: OutFinish,
@@ -327,6 +336,9 @@ export default class Manager extends Views {
     this.pageWheelHandler = (event) => this.onPageWheel(event);
     this.detailScrollHandler = () => this.onDetailScroll();
     this.detailWheelHandler = (event) => this.onDetailWheel(event);
+    this.detailTouchStartHandler = (event) => this.onDetailTouchStart(event);
+    this.detailTouchMoveHandler = (event) => this.onDetailTouchMove(event);
+    this.detailTouchEndHandler = () => this.onDetailTouchEnd();
     this.pointerHandler = (event) => this.onPointerMove(event);
     this.keyHandler = (event) => this.onKey(event);
     this.dragStartHandler = (event) => this.onDragStart(event);
@@ -451,6 +463,11 @@ export default class Manager extends Views {
     this.DOM.root?.classList.add("is-mobile-mode");
     this.addEvent(window, "scroll", this.scrollHandler, { passive: true }, "mobileEvents");
     this.addEvent(this.DOM.detail, "scroll", this.detailScrollHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "wheel", this.detailWheelHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "touchstart", this.detailTouchStartHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "touchmove", this.detailTouchMoveHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "touchend", this.detailTouchEndHandler, { passive: true }, "mobileEvents");
+    this.addEvent(this.DOM.detail, "touchcancel", this.detailTouchEndHandler, { passive: true }, "mobileEvents");
     this.addEvent(document, "click", this.mobileStageClickHandler, true, "mobileEvents");
     this.updateScene(true);
   }
@@ -652,6 +669,21 @@ export default class Manager extends Views {
     this.detailBottomReadyAt = 0;
     this.detailBottomIntent = 0;
     this.detailBottomIntentAt = 0;
+    if (scope === "detail") {
+      window.clearTimeout(this.detailBottomCheckTimer);
+      this.detailBottomCheckTimer = null;
+    }
+  }
+
+  resetDetailTopIntent() {
+    this.detailTopReadyAt = 0;
+    window.clearTimeout(this.detailTopCheckTimer);
+    this.detailTopCheckTimer = null;
+  }
+
+  resetDetailEdgeIntents() {
+    this.resetBottomPushIntent("detail");
+    this.resetDetailTopIntent();
   }
 
   isStrongBottomPush(scope, deltaY) {
@@ -727,18 +759,23 @@ export default class Manager extends Views {
   }
 
   onDetailScroll() {
-    if (this.isMobile) return;
     if (!this.DOM.root.classList.contains("is-detail-open")) return;
     if (this.currentDetailProjectIndex < 0) return;
     if (Date.now() < this.detailIgnoreScrollUntil) return;
 
     const scrollTop = this.DOM.detail.scrollTop;
+    const scrollDirection = scrollTop - this.lastDetailScrollTop;
     this.lastDetailScrollTop = scrollTop;
 
     const maxScroll = Math.max(1, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight);
     const threshold = Math.max(32, this.DOM.detail.clientHeight * 0.02);
     const reachedBottom = scrollTop >= maxScroll - threshold;
     const leftBottomZone = scrollTop < maxScroll - threshold * 3;
+
+    if (this.isMobile) {
+      this.onMobileDetailScroll(scrollTop, maxScroll, threshold, scrollDirection);
+      return;
+    }
 
     if (this.detailSuppressBottomTrigger) {
       if (leftBottomZone) {
@@ -757,14 +794,134 @@ export default class Manager extends Views {
     if (reachedBottom && !this.detailBottomReadyAt) this.detailBottomReadyAt = Date.now() + 320;
   }
 
+  onMobileDetailScroll(scrollTop, maxScroll, threshold, scrollDirection) {
+    if (this.detailBottomLocked) return;
+
+    const reachedTop = scrollTop <= threshold;
+    const reachedBottom = scrollTop >= maxScroll - threshold;
+    const leftBottomZone = scrollTop < maxScroll - threshold * 3;
+    const leftTopZone = scrollTop > threshold * 3;
+
+    if (this.detailSuppressBottomTrigger) {
+      if (leftBottomZone) {
+        this.detailSuppressBottomTrigger = false;
+        this.resetBottomPushIntent("detail");
+      }
+    } else if (!reachedBottom) {
+      this.resetBottomPushIntent("detail");
+    }
+
+    if (leftTopZone) this.resetDetailTopIntent();
+
+    if (reachedBottom && scrollDirection > 0 && !this.detailSuppressBottomTrigger) {
+      this.scheduleMobileDetailEdge("next");
+    } else if (reachedTop && scrollDirection < 0) {
+      this.scheduleMobileDetailEdge("previous");
+    }
+  }
+
+  scheduleMobileDetailEdge(direction, immediate = false) {
+    if (!this.isMobile || this.detailBottomLocked) return;
+    if (!this.DOM.root.classList.contains("is-detail-open")) return;
+    if (this.detailGalleryIsAppending) return;
+    const isNext = direction === "next";
+    const targetIndex = this.currentDetailProjectIndex + (isNext ? 1 : -1);
+    if (!this.detailProjectSequence[targetIndex]) return;
+
+    const readyKey = isNext ? "detailBottomReadyAt" : "detailTopReadyAt";
+    const timerKey = isNext ? "detailBottomCheckTimer" : "detailTopCheckTimer";
+    const wait = immediate ? 0 : 150;
+
+    if (immediate) this[readyKey] = Date.now();
+    else if (!this[readyKey]) this[readyKey] = Date.now() + wait;
+    const remaining = this[readyKey] - Date.now();
+    window.clearTimeout(this[timerKey]);
+
+    if (remaining > 0) {
+      this[timerKey] = window.setTimeout(() => {
+        this[timerKey] = null;
+        this.checkMobileDetailEdge(direction);
+      }, Math.max(30, remaining));
+      return;
+    }
+
+    this.checkMobileDetailEdge(direction);
+  }
+
+  checkMobileDetailEdge(direction) {
+    if (!this.isMobile || this.detailBottomLocked) return;
+    if (!this.DOM.root.classList.contains("is-detail-open")) return;
+    if (this.detailGalleryIsAppending) return;
+
+    const scrollTop = this.DOM.detail.scrollTop;
+    const maxScroll = Math.max(1, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight);
+    const threshold = Math.max(32, this.DOM.detail.clientHeight * 0.02);
+    const isNext = direction === "next";
+    const isAtEdge = isNext ? scrollTop >= maxScroll - threshold : scrollTop <= threshold;
+
+    if (!isAtEdge) {
+      if (isNext) this.resetBottomPushIntent("detail");
+      else this.resetDetailTopIntent();
+      return;
+    }
+
+    if (isNext) this.openNextDetailProject();
+    else this.openPreviousDetailProject();
+  }
+
+  onDetailTouchStart(event) {
+    if (!this.isMobile || !this.DOM.root.classList.contains("is-detail-open")) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    this.detailTouchStartY = touch.clientY;
+    this.detailTouchLastY = touch.clientY;
+  }
+
+  onDetailTouchMove(event) {
+    if (!this.isMobile || !this.DOM.root.classList.contains("is-detail-open")) return;
+    if (this.currentDetailProjectIndex < 0 || this.detailBottomLocked) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+
+    const deltaFromStart = this.detailTouchStartY - touch.clientY;
+    const deltaStep = this.detailTouchLastY - touch.clientY;
+    this.detailTouchLastY = touch.clientY;
+
+    const scrollTop = this.DOM.detail.scrollTop;
+    const maxScroll = Math.max(1, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight);
+    const threshold = Math.max(32, this.DOM.detail.clientHeight * 0.02);
+    const reachedBottom = scrollTop >= maxScroll - threshold;
+    const reachedTop = scrollTop <= threshold;
+
+    if (reachedBottom && deltaFromStart > 56 && deltaStep > 0 && !this.detailSuppressBottomTrigger) {
+      this.scheduleMobileDetailEdge("next", true);
+    } else if (reachedTop && deltaFromStart < -56 && deltaStep < 0) {
+      this.scheduleMobileDetailEdge("previous", true);
+    }
+  }
+
+  onDetailTouchEnd() {
+    this.detailTouchStartY = 0;
+    this.detailTouchLastY = 0;
+  }
+
   onDetailWheel(event) {
-    if (this.isMobile) return;
     if (!this.DOM.root.classList.contains("is-detail-open")) return;
     if (this.currentDetailProjectIndex < 0) return;
     if (Date.now() < this.detailIgnoreScrollUntil || this.detailBottomLocked) return;
 
     const maxScroll = Math.max(1, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight);
     const threshold = Math.max(32, this.DOM.detail.clientHeight * 0.02);
+    if (this.isMobile) {
+      if (this.detailGalleryIsAppending) return;
+      if (event.deltaY > 0 && this.DOM.detail.scrollTop >= maxScroll - threshold && !this.detailSuppressBottomTrigger) {
+        this.scheduleMobileDetailEdge("next", true);
+      } else if (event.deltaY < 0 && this.DOM.detail.scrollTop <= threshold) {
+        this.scheduleMobileDetailEdge("previous", true);
+      }
+      return;
+    }
+
     if (this.detailSuppressBottomTrigger && event.deltaY > 0) return;
     if (event.deltaY > 0 && this.DOM.detail.scrollTop >= maxScroll - threshold) {
       if (this.isStrongBottomPush("detail", event.deltaY)) this.openNextDetailProject();
@@ -1406,6 +1563,26 @@ export default class Manager extends Views {
     if (this.galleryTimeoutHandle) window.clearTimeout(this.galleryTimeoutHandle);
     this.galleryIdleHandle = null;
     this.galleryTimeoutHandle = null;
+    this.detailGalleryIsAppending = false;
+  }
+
+  scrollDetailToBottom() {
+    if (!this.DOM.detail) return;
+    this.DOM.detail.scrollTo({
+      top: Math.max(0, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight),
+      behavior: "instant",
+    });
+    this.lastDetailScrollTop = this.DOM.detail.scrollTop;
+  }
+
+  pinDetailToBottom(duration = 1800) {
+    this.detailPinToBottomUntil = Date.now() + duration;
+    this.scrollDetailToBottom();
+    [80, 220, 520, 900, 1400].forEach((delay) => {
+      window.setTimeout(() => {
+        if (Date.now() < this.detailPinToBottomUntil) this.scrollDetailToBottom();
+      }, delay);
+    });
   }
 
   createNodesFromHTML(html) {
@@ -1439,7 +1616,10 @@ export default class Manager extends Views {
       const batch = items.slice(startIndex, startIndex + batchSize);
       const appended = batch.flatMap((item) => this.appendGalleryItem(item, project));
       this.revealGalleryItems(appended, startIndex);
-      this.scheduleGalleryAppend(project, items, startIndex + batch.length, token);
+      if (this.detailPinToBottomUntil && Date.now() < this.detailPinToBottomUntil) this.scrollDetailToBottom();
+      const nextIndex = startIndex + batch.length;
+      this.detailGalleryIsAppending = nextIndex < items.length;
+      this.scheduleGalleryAppend(project, items, nextIndex, token);
     };
 
     if (window.requestIdleCallback) {
@@ -1456,6 +1636,7 @@ export default class Manager extends Views {
     this.DOM.detailGallery.innerHTML = shell;
     const firstBatchSize = Math.min(1, items.length);
     items.slice(0, firstBatchSize).forEach((item) => this.appendGalleryItem(item, project));
+    this.detailGalleryIsAppending = firstBatchSize < items.length;
     this.scheduleGalleryAppend(project, items, firstBatchSize, token);
   }
 
@@ -1496,20 +1677,25 @@ export default class Manager extends Views {
     return nextProject?.titleZh || nextProject?.title || "";
   }
 
+  getDetailIndexLabel(project) {
+    const index = this.detailProjectSequence.indexOf(project?.title);
+    return index >= 0 ? String(index + 1).padStart(2, "0") : "01";
+  }
+
   openProject(project) {
     this.currentDetailProjectIndex = this.detailProjectSequence.indexOf(project.title);
     this.detailSuppressBottomTrigger = false;
-    this.resetBottomPushIntent("detail");
+    this.detailPinToBottomUntil = 0;
+    this.resetDetailEdgeIntents();
     if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
     this.DOM.detail.setAttribute("aria-hidden", "false");
-    const projectIndex = Math.max(0, projects.findIndex((item) => item.title === project.title));
     this.setDetailHero({
       title: "",
       summary: "",
       image: project.image,
-      indexLabel: "",
+      indexLabel: this.getDetailIndexLabel(project),
       project,
     });
     this.setDetailGallery(project);
@@ -1524,7 +1710,8 @@ export default class Manager extends Views {
     const project = projects.find((item) => item.title !== "ALL PAGES" && item.pages.includes(page.number)) || projects[0];
     this.currentDetailProjectIndex = this.detailProjectSequence.indexOf(project.title);
     this.detailSuppressBottomTrigger = false;
-    this.resetBottomPushIntent("detail");
+    this.detailPinToBottomUntil = 0;
+    this.resetDetailEdgeIntents();
     if (!this.isMobile) this.lockDetailBottomBriefly();
     this.DOM.root.classList.add("is-detail-open");
     this.DOM.detail.classList.add("is-gallery-only");
@@ -1533,7 +1720,7 @@ export default class Manager extends Views {
       title: "",
       summary: "",
       image: page.src,
-      indexLabel: "",
+      indexLabel: this.getDetailIndexLabel(project),
       project,
     });
     this.setDetailGallery(project, page);
@@ -1544,7 +1731,6 @@ export default class Manager extends Views {
   }
 
   openNextDetailProject() {
-    if (this.isMobile) return;
     const nextProjectTitle = this.detailProjectSequence[this.currentDetailProjectIndex + 1];
     if (!nextProjectTitle) return;
 
@@ -1552,20 +1738,29 @@ export default class Manager extends Views {
     if (!nextProject) return;
 
     this.detailBottomLocked = true;
-    this.resetBottomPushIntent("detail");
+    this.detailIgnoreScrollUntil = Date.now() + (this.isMobile ? 520 : 0);
+    this.resetDetailEdgeIntents();
+    const outState = this.isMobile ? { autoAlpha: 0.32, y: -20 } : { autoAlpha: 0.2 };
+    const inStart = this.isMobile ? { autoAlpha: 0.32, y: 24 } : { autoAlpha: 0.2 };
+    const inEnd = this.isMobile
+      ? { autoAlpha: 1, y: 0, duration: 0.32, ease: "power2.out", onComplete: () => {
+          this.detailBottomLocked = false;
+          this.detailIgnoreScrollUntil = 0;
+        } }
+      : { autoAlpha: 1, duration: 0.5, ease: "expo.out" };
     GSAP.to(this.DOM.detail, {
-      autoAlpha: 0.2,
-      duration: 0.28,
+      ...outState,
+      duration: this.isMobile ? 0.2 : 0.28,
       ease: "expo.inOut",
       onComplete: () => {
         this.openProject(nextProject);
-        GSAP.fromTo(this.DOM.detail, { autoAlpha: 0.2 }, { autoAlpha: 1, duration: 0.5, ease: "expo.out" });
+        if (this.isMobile) this.detailBottomLocked = true;
+        GSAP.fromTo(this.DOM.detail, inStart, inEnd);
       },
     });
   }
 
   openPreviousDetailProject() {
-    if (this.isMobile) return;
     const previousProjectTitle = this.detailProjectSequence[this.currentDetailProjectIndex - 1];
     if (!previousProjectTitle) return;
 
@@ -1573,20 +1768,30 @@ export default class Manager extends Views {
     if (!previousProject) return;
 
     this.detailBottomLocked = true;
-    this.resetBottomPushIntent("detail");
+    this.detailIgnoreScrollUntil = Date.now() + (this.isMobile ? 620 : 0);
+    this.resetDetailEdgeIntents();
+    const outState = this.isMobile ? { autoAlpha: 0.32, y: 20 } : { autoAlpha: 0.2 };
+    const inStart = this.isMobile ? { autoAlpha: 0.32, y: -24 } : { autoAlpha: 0.2 };
+    const inEnd = this.isMobile
+      ? { autoAlpha: 1, y: 0, duration: 0.32, ease: "power2.out", onComplete: () => {
+          this.detailBottomLocked = false;
+          this.detailIgnoreScrollUntil = 0;
+        } }
+      : { autoAlpha: 1, duration: 0.5, ease: "expo.out" };
     GSAP.to(this.DOM.detail, {
-      autoAlpha: 0.2,
-      duration: 0.28,
+      ...outState,
+      duration: this.isMobile ? 0.2 : 0.28,
       ease: "expo.inOut",
       onComplete: () => {
         this.openProject(previousProject);
-        this.DOM.detail.scrollTo({
-          top: Math.max(0, this.DOM.detail.scrollHeight - this.DOM.detail.clientHeight),
-          behavior: "instant",
-        });
-        this.lastDetailScrollTop = this.DOM.detail.scrollTop;
+        if (this.isMobile) {
+          this.detailBottomLocked = true;
+          this.pinDetailToBottom(2100);
+        } else {
+          this.scrollDetailToBottom();
+        }
         this.detailSuppressBottomTrigger = true;
-        GSAP.fromTo(this.DOM.detail, { autoAlpha: 0.2 }, { autoAlpha: 1, duration: 0.5, ease: "expo.out" });
+        GSAP.fromTo(this.DOM.detail, inStart, inEnd);
       },
     });
   }
@@ -1613,10 +1818,13 @@ export default class Manager extends Views {
     this.detailSuppressBottomTrigger = false;
     this.detailIgnoreScrollUntil = 0;
     this.lastDetailScrollTop = 0;
-    this.resetBottomPushIntent("detail");
+    this.detailPinToBottomUntil = 0;
+    this.resetDetailEdgeIntents();
     if (this.DOM.detail) this.DOM.detail.style.overflowY = "";
     this.cancelGalleryAppend();
     window.clearTimeout(this.detailBottomUnlockTimer);
+    window.clearTimeout(this.detailTopCheckTimer);
+    window.clearTimeout(this.detailBottomCheckTimer);
     if (this.isMobile) {
       window.scrollTo({ top: 0, behavior: "auto" });
       this.updateScene(true);
