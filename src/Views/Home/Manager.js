@@ -98,6 +98,7 @@ export default class Manager extends Views {
     this.boundNearPanelHandlers = [];
     this.boundFeaturePanelHandlers = [];
     this.mobileFrame = 0;
+    this.mobileDustPhase = 0;
     this.lastMobileSceneY = -1;
     this.lastMobileSceneAt = 0;
     this.mobileScrollRaf = null;
@@ -992,7 +993,7 @@ export default class Manager extends Views {
     return {
       visibleRange: this.isMobile ? 1.6 : 2.2,
       preloadRange: this.isMobile ? 2.2 : 3,
-      dustDepthRange: this.isMobile ? 4300 : 5600,
+      dustDepthRange: this.isMobile ? 2800 : 5600,
     };
   }
 
@@ -1127,6 +1128,7 @@ export default class Manager extends Views {
     });
 
     this.dustMetrics.forEach((metric) => {
+      if (this.isMobile && !force && metric.index % 2 !== this.mobileDustPhase) return;
       const next = this.getDustTransform(metric);
       if (!this.shouldUpdateByOpacity(metric, next.opacity, force)) return;
       metric.dot.style.transform = next.transform;
@@ -1603,6 +1605,7 @@ export default class Manager extends Views {
         !this.DOM.root.classList.contains("is-detail-open") &&
         !this.DOM.root.classList.contains("is-contact-open")
       ) {
+        this.mobileDustPhase = (this.mobileDustPhase + 1) % 2;
         this.updateScene(false);
       }
       return;

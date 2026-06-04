@@ -2179,6 +2179,15 @@ main {
 }
 
 @media (max-width: 768px) {
+  .GRBPortfolio[data-template="Home"],
+  [data-key="/"] {
+    min-height: 1180vh;
+  }
+
+  .ScrollDepth {
+    height: 1180vh;
+  }
+
   html,
   body {
     overflow-x: hidden;
@@ -2222,11 +2231,44 @@ main {
     pointer-events: none;
   }
 
+  .GRBPortfolio.is-mobile-mode .SpaceCard:not(.is-visible) img,
+  .GRBPortfolio.is-mobile-mode .NearPanel:not(.is-visible) img,
+  .GRBPortfolio.is-mobile-mode .FeaturePanel:not(.is-visible) img,
+  .GRBPortfolio.is-mobile-mode .SpaceDust__dot:not(.is-visible) {
+    animation-play-state: paused;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard img {
+    animation-name: grb-card-inner-float-mobile;
+  }
+
+  .GRBPortfolio.is-mobile-mode .SpaceCard:nth-child(5n) img {
+    animation-name: grb-card-inner-drift-mobile;
+  }
+
   .SpaceCard,
   .FeaturePanel,
   .GalleryItem,
   .DetailGallery img {
     backface-visibility: hidden;
+  }
+}
+
+@keyframes grb-card-inner-float-mobile {
+  from {
+    transform: translate3d(-1.5%, -1.2%, 0) scale(1.045) rotate(-0.45deg);
+  }
+  to {
+    transform: translate3d(1.8%, 1.4%, 0) scale(1.085) rotate(0.45deg);
+  }
+}
+
+@keyframes grb-card-inner-drift-mobile {
+  from {
+    transform: translate3d(1.3%, -1.4%, 0) scale(1.04) rotate(0.6deg);
+  }
+  to {
+    transform: translate3d(-1.7%, 1.7%, 0) scale(1.09) rotate(-0.35deg);
   }
 }
 
