@@ -402,6 +402,7 @@ export default class Manager extends Views {
     this.mobileScrollRaf = window.requestAnimationFrame(() => {
       this.mobileScrollRaf = null;
       this.updateTargetProgress();
+      this.checkMobileHomeBottom();
       const progress = this.targetProgress;
       this.DOM.root?.style.setProperty("--scene-progress", `${progress}`);
       if (this.DOM.scrollProgress) {
@@ -460,6 +461,10 @@ export default class Manager extends Views {
     if (this.mobileScrollRaf) {
       window.cancelAnimationFrame(this.mobileScrollRaf);
       this.mobileScrollRaf = null;
+    }
+    if (this.mobileBottomCheckTimer) {
+      window.clearTimeout(this.mobileBottomCheckTimer);
+      this.mobileBottomCheckTimer = null;
     }
     this.DOM.root?.classList.remove("is-mobile-mode");
     this.mode = null;
@@ -687,6 +692,38 @@ export default class Manager extends Views {
 
     if (event.deltaY <= 0 || this.bottomProjectOpened) return;
     if (this.isStrongBottomPush("home", event.deltaY)) this.openBottomProject();
+  }
+
+  checkMobileHomeBottom() {
+    if (!this.isMobile || this.bottomProjectOpened) return;
+    if (!this.isEntered || this.DOM.root.classList.contains("is-detail-open") || this.DOM.root.classList.contains("is-contact-open")) return;
+
+    const maxScroll = this.getMaxScroll();
+    const currentScroll = window.scrollY;
+    const bottomThreshold = Math.max(48, window.innerHeight * 0.08);
+    const reachedBottom = currentScroll >= maxScroll - bottomThreshold;
+
+    if (!reachedBottom) {
+      if (this.mobileBottomCheckTimer) {
+        window.clearTimeout(this.mobileBottomCheckTimer);
+        this.mobileBottomCheckTimer = null;
+      }
+      return;
+    }
+    if (!this.homeBottomReadyAt) {
+      this.homeBottomReadyAt = Date.now() + 120;
+    }
+    const waitTime = this.homeBottomReadyAt - Date.now();
+    if (waitTime > 0) {
+      if (!this.mobileBottomCheckTimer) {
+        this.mobileBottomCheckTimer = window.setTimeout(() => {
+          this.mobileBottomCheckTimer = null;
+          this.checkMobileHomeBottom();
+        }, Math.max(40, waitTime));
+      }
+      return;
+    }
+    this.openBottomProject();
   }
 
   onDetailScroll() {
@@ -1069,7 +1106,8 @@ export default class Manager extends Views {
 
   updateScene(force = false) {
     this.updateTargetProgress();
-    this.progress = force ? this.targetProgress : this.progress + (this.targetProgress - this.progress) * 0.15;
+    const sceneEase = this.isMobile ? 0.32 : 0.15;
+    this.progress = force ? this.targetProgress : this.progress + (this.targetProgress - this.progress) * sceneEase;
     const progressDelta = Math.abs(this.progress - this.lastProgress);
     const mouseDelta = Math.abs(this.mouse.x - this.lastMouseX) + Math.abs(this.mouse.y - this.lastMouseY);
     const timeDelta = Math.abs(this.sceneTime - this.lastSceneTime);
@@ -1672,12 +1710,11 @@ export default class Manager extends Views {
       this.sceneTime += 0.016;
       this.mobileFrame = (this.mobileFrame + 1) % 2;
       if (
-        this.mobileFrame === 0 &&
         this.isEntered &&
         !this.DOM.root.classList.contains("is-detail-open") &&
         !this.DOM.root.classList.contains("is-contact-open")
       ) {
-        this.mobileDustPhase = (this.mobileDustPhase + 1) % 2;
+        if (this.mobileFrame === 0) this.mobileDustPhase = (this.mobileDustPhase + 1) % 2;
         this.updateScene(false);
       }
       return;
