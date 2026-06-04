@@ -6,7 +6,9 @@
   },
   "scripts": {
     "start": "node dist/index.js",
-    "build": "NODE_ENV=production NODE_OPTIONS=--openssl-legacy-provider webpack --mode=production --config ./lib/Bundler/webpack.prod.js",
+    "clean:dist": "node scripts/clean-dist.js",
+    "generate:portfolio-images": "node scripts/generate-portfolio-images.js",
+    "build": "npm run clean:dist && NODE_ENV=production NODE_OPTIONS=--openssl-legacy-provider webpack --mode=production --config ./lib/Bundler/webpack.prod.js",
     "watch": "webpack --watch ",
     "dev:server": "NODE_ENV=production nodemon dist",
     "dev:watcher": "node lib/Watchers/watcher.js",
@@ -45,6 +47,7 @@
     "postcss-loader": "^7.0.1",
     "sass": "^1.54.4",
     "sass-loader": "^13.0.2",
+    "sharp": "^0.32.6",
     "style-loader": "^3.3.1",
     "terser-webpack-plugin": "^5.3.5",
     "ts-loader": "^9.3.1",

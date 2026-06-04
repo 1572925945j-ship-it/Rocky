@@ -1,5 +1,6 @@
 import React from "react";
 import { portfolioPages, projects } from "./Data";
+import { OptimizedImage } from "./ImageUtils";
 
 const spaceItems = Array.from({ length: 3 }).flatMap((_, layer) =>
   portfolioPages.map((page, index) => ({
@@ -182,8 +183,11 @@ const Home = () => {
                   <img
                     src={page.thumb}
                     alt={page.title}
-                    loading={page.index < 10 ? "eager" : "lazy"}
+                    loading="lazy"
                     decoding="async"
+                    width="480"
+                    height="270"
+                    draggable="false"
                   />
                   <span className="SpaceCard__label" aria-hidden="true">
                     <span>{page.type}</span>
@@ -205,7 +209,7 @@ const Home = () => {
                 data-cursor="eye"
               >
                 <span className="NearPanel__screen">
-                  <img src={page.thumb} alt={page.title} loading="lazy" decoding="async" />
+                  <img src={page.thumb} alt={page.title} loading="lazy" decoding="async" width="480" height="270" draggable="false" />
                 </span>
                 <span className="NearPanel__caption" aria-hidden="true">{page.title}</span>
               </button>
@@ -225,7 +229,14 @@ const Home = () => {
                   <span>{String(project.showcaseIndex + 1).padStart(2, "0")}</span>
                   <strong>{project.title}</strong>
                 </span>
-                <img src={project.showcaseImage} alt={project.titleZh} loading="lazy" decoding="async" />
+                <OptimizedImage
+                  src={project.showcaseImage}
+                  alt={project.titleZh}
+                  loading="lazy"
+                  sizes="(max-width: 768px) 82vw, 46vw"
+                  maxWidth={1920}
+                  useStageFallback
+                />
                 <span className="FeaturePanel__caption">
                   <strong>{project.titleZh}</strong>
                   <span>{project.role}</span>
@@ -250,7 +261,14 @@ const Home = () => {
             <strong>About</strong>
             <span>01</span>
           </div>
-          <img src="/static/portfolio/profile/resume.png" alt="靳浩然个人简历" loading="eager" decoding="async" />
+          <OptimizedImage
+            src="/static/portfolio/profile/resume.png"
+            alt="靳浩然个人简历"
+            loading="lazy"
+            sizes="(max-width: 768px) 82vw, 58vw"
+            maxWidth={1920}
+            useStageFallback
+          />
         </article>
       </section>
 
@@ -264,7 +282,15 @@ const Home = () => {
         </div>
         <div className="DetailHero">
           <div className="DetailPreview" aria-hidden="true">
-            <img className="DetailPreview__image" src="/static/portfolio/pdf_render/page-01.pdf.png" alt="" />
+            <OptimizedImage
+              className="DetailPreview__image"
+              src="/static/portfolio/pdf_render/page-01.pdf.png"
+              alt=""
+              loading="lazy"
+              sizes="(max-width: 768px) 88vw, 58vw"
+              maxWidth={1920}
+              useStageFallback
+            />
           </div>
           <div className="DetailTitle">
             <span className="DetailIndex">NO 00</span>

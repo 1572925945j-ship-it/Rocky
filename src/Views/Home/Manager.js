@@ -2,6 +2,7 @@ import GSAP from "gsap";
 import Views from "../../../lib/Routing/Views";
 import { Route } from "./Config";
 import { portfolioPages, projects } from "./Data";
+import { createOptimizedImageHTML, getStageImage, resolveAssetUrl } from "./ImageUtils";
 
 const isMobileViewport = () => {
   if (typeof window === "undefined") return false;
@@ -99,10 +100,17 @@ export default class Manager extends Views {
     this.mobileFrame = 0;
     this.lastMobileSceneY = -1;
     this.lastMobileSceneAt = 0;
+    this.mobileScrollRaf = null;
+    this.galleryAppendToken = 0;
+    this.galleryIdleHandle = null;
+    this.galleryTimeoutHandle = null;
+    this.preloadedStageImages = new Set();
+    this.lastCameraTransform = "";
   }
 
   in({ InFinish }) {
     this.cacheDom();
+    this.preloadInitialImages();
     this.isMobile = isMobileViewport();
     this.cursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     this.border = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -123,6 +131,7 @@ export default class Manager extends Views {
     this.unbindEvents();
     this.teardownDesktopMode();
     this.teardownMobileMode();
+    this.cancelGalleryAppend();
     window.clearTimeout(this.detailBottomUnlockTimer);
     this.animation = GSAP.timeline({
       onStart: NextShow,
@@ -141,6 +150,25 @@ export default class Manager extends Views {
     this.panelMetrics = this.featurePanels.map((panel) => this.createPanelMetric(panel));
     this.dustMetrics = this.dust.map((dot, index) => this.createDustMetric(dot, index));
     this.nearMetrics = this.nearPanels.map((panel) => this.createNearMetric(panel));
+  }
+
+  preloadImage(src, priority = "high") {
+    const href = resolveAssetUrl(src);
+    if (!href || this.preloadedStageImages.has(href)) return;
+    this.preloadedStageImages.add(href);
+    const link = document.createElement("link");
+    link.rel = "preload";
+    link.as = "image";
+    link.href = href;
+    link.fetchPriority = priority;
+    document.head.appendChild(link);
+  }
+
+  preloadInitialImages() {
+    const firstPage = portfolioPages[0];
+    const firstShowcase = projects.find((project) => project.title === "BUSINESS");
+    if (firstPage?.thumb) this.preloadImage(firstPage.thumb, "high");
+    if (firstShowcase?.image) this.preloadImage(getStageImage(firstShowcase.image).src, "high");
   }
 
   random(seed) {
@@ -292,7 +320,7 @@ export default class Manager extends Views {
     this.prevHandler = () => this.changeProject(-1);
     this.nextHandler = () => this.changeProject(1);
     this.openAllHandler = () => this.openProject(projects[0]);
-    this.scrollHandler = () => this.updateTargetProgress();
+    this.scrollHandler = () => this.onScroll();
     this.pageWheelHandler = (event) => this.onPageWheel(event);
     this.detailScrollHandler = () => this.onDetailScroll();
     this.detailWheelHandler = (event) => this.onDetailWheel(event);
@@ -364,6 +392,16 @@ export default class Manager extends Views {
     this[bucket] = [];
   }
 
+  onScroll() {
+    this.updateTargetProgress();
+    if (!this.isMobile || !this.isEntered || this.DOM.root.classList.contains("is-detail-open") || this.DOM.root.classList.contains("is-contact-open")) return;
+    if (this.mobileScrollRaf) return;
+    this.mobileScrollRaf = window.requestAnimationFrame(() => {
+      this.mobileScrollRaf = null;
+      this.updateScene(true);
+    });
+  }
+
   setupDesktopMode() {
     if (this.mode === "desktop") return;
     this.teardownMobileMode();
@@ -411,6 +449,10 @@ export default class Manager extends Views {
   teardownMobileMode() {
     if (this.mode !== "mobile") return;
     this.removeEvents("mobileEvents");
+    if (this.mobileScrollRaf) {
+      window.cancelAnimationFrame(this.mobileScrollRaf);
+      this.mobileScrollRaf = null;
+    }
     this.DOM.root?.classList.remove("is-mobile-mode");
     this.mode = null;
   }
@@ -864,6 +906,7 @@ export default class Manager extends Views {
         metric.ry + this.progress * 42 * metric.spin + Math.cos(idle * 0.9) * 6
       }deg) rotateZ(${metric.rz + Math.sin(idle * 0.55) * 3}deg) scale(${scale})`,
       brightness,
+      depth,
       focus: brightness > 0.42 || (focusBoost > 0.55 && depth > -900 && depth < 1200),
     };
   }
@@ -887,6 +930,8 @@ export default class Manager extends Views {
     return {
       approachLight,
       opacity,
+      phase,
+      exit,
       transform: `translate3d(calc(-50% + ${x}px), calc(-50% + ${y}vh), ${z}px) rotateX(${
         metric.rx * (1 - eased) - 5 * exit
       }deg) rotateY(${metric.ry * (1 - eased) + metric.ry * 0.45 * exit + idle * 1.4}deg) rotateZ(${
@@ -905,6 +950,7 @@ export default class Manager extends Views {
     const y = metric.yFactor * window.innerHeight + Math.cos(idle * 0.8) * 28 + (this.mouse.y - 0.5) * 48;
     return {
       opacity,
+      z,
       transform: `translate3d(calc(-50% + ${x}px), calc(-50% + ${y}px), ${z}px) rotateZ(${
         metric.rotate + this.sceneTime * 42 * metric.spin
       }deg) rotateY(${this.progress * 120 + metric.index * 3}deg) scale(${metric.scale + near * 0.95})`,
@@ -925,6 +971,7 @@ export default class Manager extends Views {
     const opacity = this.clamp(intro * 2.5) * this.clamp(1 - exit * 2.2) * this.clamp((2800 - depth) / 1300);
     return {
       opacity,
+      depth,
       transform: `translate3d(calc(-50% + ${x}px), calc(-50% + ${y}px), ${depth}px) rotateX(${
         metric.rx + pass * 22 - exit * 35
       }deg) rotateY(${metric.ry - tunnelCurve * 58 + pass * metric.side * 38}deg) rotateZ(${
@@ -934,23 +981,47 @@ export default class Manager extends Views {
     };
   }
 
+  getSceneRanges() {
+    return {
+      visibleRange: this.isMobile ? 1.6 : 2.2,
+      preloadRange: this.isMobile ? 2.2 : 3,
+      dustDepthRange: this.isMobile ? 4300 : 5600,
+    };
+  }
+
+  shouldUpdateByOpacity(metric, opacity, force = false) {
+    const visible = opacity >= 0.01;
+    if (!force && !visible && !metric.wasVisible) return false;
+    metric.wasVisible = visible;
+    return true;
+  }
+
+  setVisibilityClass(element, isVisible) {
+    element.classList.toggle("is-visible", Boolean(isVisible));
+  }
+
   updateScene(force = false) {
     this.updateTargetProgress();
     this.progress = force ? this.targetProgress : this.progress + (this.targetProgress - this.progress) * 0.15;
     const progressDelta = Math.abs(this.progress - this.lastProgress);
     const mouseDelta = Math.abs(this.mouse.x - this.lastMouseX) + Math.abs(this.mouse.y - this.lastMouseY);
     const timeDelta = Math.abs(this.sceneTime - this.lastSceneTime);
-    if (!force && progressDelta < 0.0007 && mouseDelta < 0.002 && timeDelta < 0.032) return;
+    if (!force && progressDelta < 0.0008 && mouseDelta < 0.002 && timeDelta < 0.032) return;
     this.lastProgress = this.progress;
     this.lastMouseX = this.mouse.x;
     this.lastMouseY = this.mouse.y;
     this.lastSceneTime = this.sceneTime;
     const focusIndex = Math.round(this.progress * (portfolioPages.length - 1));
+    const ranges = this.getSceneRanges();
     const tiltX = (this.mouse.y - 0.5) * -6;
     const tiltY = (this.mouse.x - 0.5) * 8;
 
     if (this.DOM.spaceCamera) {
-      this.DOM.spaceCamera.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+      const cameraTransform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+      if (force || cameraTransform !== this.lastCameraTransform) {
+        this.DOM.spaceCamera.style.transform = cameraTransform;
+        this.lastCameraTransform = cameraTransform;
+      }
     }
     this.DOM.root.style.setProperty("--title-x", `${tiltX * 0.8}deg`);
     this.DOM.root.style.setProperty("--title-y", `${tiltY * 0.8}deg`);
@@ -1025,31 +1096,46 @@ export default class Manager extends Views {
 
     this.cardMetrics.forEach((metric) => {
       const { card, page } = metric;
+      const pageDistance = Math.abs(page.index - focusIndex);
+      const inPreloadRange = pageDistance <= ranges.preloadRange;
+      if (!force && !inPreloadRange && !metric.wasInPreloadRange) {
+        this.setVisibilityClass(card, false);
+        return;
+      }
       const isShown = this.activeFilter === "all" || page.type === this.activeFilter;
       const next = this.getCardTransform(metric, focusIndex);
       const shownOpacity = 0.18 + next.brightness * 0.82;
       const hiddenOpacity = 0.04 + next.brightness * 0.14;
+      const cardOpacity = isShown ? shownOpacity : hiddenOpacity;
+      const isVisible = inPreloadRange && cardOpacity > 0.01 && Math.abs(next.depth) < 3600;
       card.style.transform = next.transform;
-      card.style.opacity = isShown ? shownOpacity : hiddenOpacity;
+      card.style.opacity = cardOpacity;
       card.style.filter = `brightness(${0.72 + next.brightness * 0.62}) saturate(${
         0.86 + next.brightness * 0.28
       }) contrast(${0.96 + next.brightness * 0.12})`;
       card.classList.toggle("is-focus", next.focus);
       card.classList.toggle("is-hidden", !isShown);
+      this.setVisibilityClass(card, isVisible);
+      metric.wasInPreloadRange = inPreloadRange;
     });
 
     this.dustMetrics.forEach((metric) => {
       const next = this.getDustTransform(metric);
+      if (!this.shouldUpdateByOpacity(metric, next.opacity, force)) return;
       metric.dot.style.transform = next.transform;
       metric.dot.style.opacity = next.opacity;
+      this.setVisibilityClass(metric.dot, next.opacity > 0.01 && Math.abs(next.z) < ranges.dustDepthRange);
     });
 
     this.nearMetrics.forEach((metric) => {
       const isShown = this.activeFilter === "all" || metric.page?.type === this.activeFilter;
       const next = this.getNearTransform(metric);
+      const panelOpacity = isShown ? next.opacity : next.opacity * 0.1;
+      if (!this.shouldUpdateByOpacity(metric, panelOpacity, force)) return;
       metric.panel.style.transform = next.transform;
-      metric.panel.style.opacity = isShown ? next.opacity : next.opacity * 0.1;
+      metric.panel.style.opacity = panelOpacity;
       metric.panel.style.pointerEvents = next.active && isShown ? "all" : "none";
+      this.setVisibilityClass(metric.panel, panelOpacity > 0.01 && Math.abs(next.depth) < 2400);
     });
 
     this.panelMetrics.forEach((metric) => {
@@ -1058,6 +1144,7 @@ export default class Manager extends Views {
       const inOwnPass = next.approachLight > 0.08;
       const isShown = matchesFilter || inOwnPass;
       const panelOpacity = isShown ? next.opacity : next.opacity * 0.08;
+      if (!this.shouldUpdateByOpacity(metric, panelOpacity, force)) return;
       const panelLight = next.approachLight;
       metric.panel.style.transform = next.transform;
       metric.panel.style.opacity = panelOpacity;
@@ -1067,13 +1154,14 @@ export default class Manager extends Views {
       metric.panel.style.setProperty("--panel-image-brightness", `${0.82 + panelLight * 0.36}`);
       metric.panel.style.setProperty("--panel-image-saturation", `${0.88 + panelLight * 0.2}`);
       metric.panel.style.pointerEvents = next.opacity > 0.35 && isShown ? "all" : "none";
+      this.setVisibilityClass(metric.panel, panelOpacity > 0.01);
     });
   }
 
-  buildGallery(project) {
+  getGalleryImages(project) {
     const customImages = project.customImages || [];
     const extraImages = project.extraImages || [];
-    const images = [
+    return [
       ...customImages.map((image) => ({
         ...image,
         fitFull: true,
@@ -1094,34 +1182,74 @@ export default class Manager extends Views {
         };
       })),
     ];
+  }
 
-    const renderItem = (image, index = 0) => {
-      const loading = index === 0 ? "eager" : "lazy";
-      return `
+  getGalleryImageSizes(image = {}) {
+    if (image.size === "brand-cover" || image.size === "brand-long") return "(max-width: 768px) 92vw, 86vw";
+    if (image.size === "ip-cover" || image.size === "other-cover") return "(max-width: 768px) 92vw, 82vw";
+    if (image.size === "ip-pair" || image.size === "other-pair") return "(max-width: 768px) 46vw, 44vw";
+    if (image.fitFull || image.preserveFrame || image.size === "xlarge") return "(max-width: 768px) 100vw, 92vw";
+    if (image.size === "large") return "(max-width: 768px) 100vw, 46vw";
+    return "(max-width: 768px) 100vw, 24vw";
+  }
+
+  renderGalleryItem(image, index = 0, project) {
+    const loading = index === 0 ? "eager" : "lazy";
+    const fetchPriority = index === 0 ? "high" : undefined;
+    const imageHTML = createOptimizedImageHTML(image.src, image.alt || image.title || project.title, {
+      loading,
+      fetchPriority,
+      sizes: this.getGalleryImageSizes(image),
+    });
+    return `
       <figure class="GalleryItem ${image.size}${image.preserveFrame ? " is-preserve" : ""}${image.fitFull ? " is-fit-full" : ""}">
-        <img src="${image.src}" alt="${image.alt || image.title || project.title}" loading="${loading}" decoding="async" draggable="false" />
+        ${imageHTML}
       </figure>
     `;
+  }
+
+  getGalleryPlan(project, selectedPage = null) {
+    const images = this.getGalleryImages(project);
+    const items = [];
+    let shell = "";
+    let itemIndex = 0;
+
+    const pushItem = (image, target = "root", before = null) => {
+      items.push({
+        image,
+        target,
+        before,
+        index: itemIndex,
+      });
+      itemIndex += 1;
     };
 
+    if (selectedPage && !project.customImages) {
+      pushItem({
+        src: selectedPage.src,
+        title: selectedPage.title,
+        size: "xlarge",
+        preserveFrame: false,
+        fitFull: false,
+      });
+    }
+
     if (project.title === "BRAND") {
-      return `
-        <div class="GalleryBrand">
-          ${images.map(renderItem).join("")}
-        </div>
-      `;
+      shell = `<div class="GalleryBrand" data-gallery-target="brand"></div>`;
+      images.forEach((image) => pushItem(image, "[data-gallery-target='brand']"));
+      return { shell, items };
     }
 
     if (project.title === "IP DESIGN" || project.title === "AIGC VISUAL") {
       const [cover, ...pairs] = images;
-      return `
-        <div class="GalleryIP${project.title === "AIGC VISUAL" ? " GalleryOther" : ""}">
-          ${cover ? renderItem(cover, 0) : ""}
-          <div class="GalleryPairGrid GalleryPairGrid--ip">
-            ${pairs.map((image, index) => renderItem(image, index + 1)).join("")}
-          </div>
+      shell = `
+        <div class="GalleryIP${project.title === "AIGC VISUAL" ? " GalleryOther" : ""}" data-gallery-target="ip">
+          <div class="GalleryPairGrid GalleryPairGrid--ip" data-gallery-target="pairs"></div>
         </div>
       `;
+      if (cover) pushItem(cover, "[data-gallery-target='ip']", "[data-gallery-target='pairs']");
+      pairs.forEach((image) => pushItem(image, "[data-gallery-target='pairs']"));
+      return { shell, items };
     }
 
     if (project.title === "BUSINESS") {
@@ -1129,38 +1257,109 @@ export default class Manager extends Views {
       const cover = imageByNumber.get("04");
       if (this.isMobile) {
         const mobileSequence = ["05", "06", "07", "09", "08"].map((number) => imageByNumber.get(number)).filter(Boolean);
-        return `
-          ${cover ? renderItem(cover, 0) : ""}
-          ${mobileSequence.map((image, index) => renderItem(image, index + 1)).join("")}
-        `;
+        if (cover) pushItem(cover);
+        mobileSequence.forEach((image) => pushItem(image));
+        return { shell, items };
       }
 
       const leftColumn = ["05", "07"].map((number) => imageByNumber.get(number)).filter(Boolean);
       const rightColumn = ["06", "09", "08"].map((number) => imageByNumber.get(number)).filter(Boolean);
 
-      return `
-        ${cover ? renderItem(cover, 0) : ""}
+      shell = `
         <div class="GalleryColumns GalleryColumns--business">
-          <div class="GalleryColumn">
-            ${leftColumn.map((image, index) => renderItem(image, index + 1)).join("")}
-          </div>
-          <div class="GalleryColumn">
-            ${rightColumn.map((image, index) => renderItem(image, index + leftColumn.length + 1)).join("")}
-          </div>
+          <div class="GalleryColumn" data-gallery-target="business-left"></div>
+          <div class="GalleryColumn" data-gallery-target="business-right"></div>
         </div>
       `;
+      if (cover) pushItem(cover, "root", ".GalleryColumns--business");
+      leftColumn.forEach((image) => pushItem(image, "[data-gallery-target='business-left']"));
+      rightColumn.forEach((image) => pushItem(image, "[data-gallery-target='business-right']"));
+      return { shell, items };
     }
 
-    return `
-      ${images.map(renderItem).join("")}
-    `;
+    images.forEach((image) => pushItem(image));
+    return { shell, items };
+  }
+
+  cancelGalleryAppend() {
+    this.galleryAppendToken += 1;
+    if (this.galleryIdleHandle && window.cancelIdleCallback) window.cancelIdleCallback(this.galleryIdleHandle);
+    if (this.galleryTimeoutHandle) window.clearTimeout(this.galleryTimeoutHandle);
+    this.galleryIdleHandle = null;
+    this.galleryTimeoutHandle = null;
+  }
+
+  createNodesFromHTML(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html.trim();
+    return [...template.content.childNodes];
+  }
+
+  appendGalleryItem(item, project) {
+    const target = item.target === "root" ? this.DOM.detailGallery : this.DOM.detailGallery.querySelector(item.target);
+    if (!target) return [];
+    const nodes = this.createNodesFromHTML(this.renderGalleryItem(item.image, item.index, project));
+    const before = item.before ? this.DOM.detailGallery.querySelector(item.before) : null;
+    nodes.forEach((node) => {
+      if (before && target.contains(before)) {
+        target.insertBefore(node, before);
+      } else {
+        target.appendChild(node);
+      }
+    });
+    return nodes.filter((node) => node.nodeType === 1);
+  }
+
+  scheduleGalleryAppend(project, items, startIndex, token) {
+    if (startIndex >= items.length) return;
+    const run = () => {
+      if (token !== this.galleryAppendToken || !this.DOM.root.classList.contains("is-detail-open")) return;
+      this.galleryIdleHandle = null;
+      this.galleryTimeoutHandle = null;
+      const batchSize = this.isMobile ? 2 : 3;
+      const batch = items.slice(startIndex, startIndex + batchSize);
+      const appended = batch.flatMap((item) => this.appendGalleryItem(item, project));
+      this.revealGalleryItems(appended, startIndex);
+      this.scheduleGalleryAppend(project, items, startIndex + batch.length, token);
+    };
+
+    if (window.requestIdleCallback) {
+      this.galleryIdleHandle = window.requestIdleCallback(run, { timeout: 260 });
+    } else {
+      this.galleryTimeoutHandle = window.setTimeout(run, 80);
+    }
+  }
+
+  setDetailGallery(project, selectedPage = null) {
+    this.cancelGalleryAppend();
+    const token = this.galleryAppendToken;
+    const { shell, items } = this.getGalleryPlan(project, selectedPage);
+    this.DOM.detailGallery.innerHTML = shell;
+    const firstBatchSize = Math.min(1, items.length);
+    items.slice(0, firstBatchSize).forEach((item) => this.appendGalleryItem(item, project));
+    this.scheduleGalleryAppend(project, items, firstBatchSize, token);
   }
 
   setDetailHero({ title, summary, image, indexLabel, project }) {
     this.DOM.detailTitle.textContent = title;
     this.DOM.detailSummary.textContent = summary;
     if (this.DOM.detailIndex) this.DOM.detailIndex.textContent = indexLabel;
-    if (this.DOM.detailPreviewImage) this.DOM.detailPreviewImage.src = image;
+    if (this.DOM.detailPreviewImage) {
+      const preview = this.DOM.detailPreviewImage.closest(".DetailPreview");
+      if (preview) {
+        preview.innerHTML = createOptimizedImageHTML(image, "", {
+          className: "DetailPreview__image",
+          loading: "lazy",
+          sizes: "(max-width: 768px) 88vw, 58vw",
+          maxWidth: 1920,
+          useStageFallback: true,
+        });
+        this.DOM.detailPreviewImage = preview.querySelector(".DetailPreview__image");
+      } else {
+        const stageImage = getStageImage(image);
+        this.DOM.detailPreviewImage.src = stageImage.src;
+      }
+    }
     if (this.DOM.detailToplineCurrent) this.DOM.detailToplineCurrent.textContent = indexLabel || "01";
     if (this.DOM.detailNextCueTitle) {
       const nextTitle = this.getNextProjectTitle(project);
@@ -1194,7 +1393,7 @@ export default class Manager extends Views {
       indexLabel: "",
       project,
     });
-    this.DOM.detailGallery.innerHTML = this.buildGallery(project);
+    this.setDetailGallery(project);
     this.DOM.detail.scrollTo({ top: 0, behavior: "instant" });
     this.lastDetailScrollTop = 0;
     this.revealDetailHero();
@@ -1203,7 +1402,7 @@ export default class Manager extends Views {
 
   openPageDetail(page) {
     if (!page) return;
-    const project = projects.find((item) => item.pages.includes(page.number)) || projects[0];
+    const project = projects.find((item) => item.title !== "ALL PAGES" && item.pages.includes(page.number)) || projects[0];
     this.currentDetailProjectIndex = this.detailProjectSequence.indexOf(project.title);
     this.detailSuppressBottomTrigger = false;
     this.resetBottomPushIntent("detail");
@@ -1218,14 +1417,7 @@ export default class Manager extends Views {
       indexLabel: "",
       project,
     });
-    this.DOM.detailGallery.innerHTML = project.customImages
-      ? this.buildGallery(project)
-      : `
-        <figure class="GalleryItem xlarge">
-          <img src="${page.src}" alt="${page.title}" loading="eager" decoding="async" draggable="false" />
-        </figure>
-        ${this.buildGallery(project)}
-      `;
+    this.setDetailGallery(project, page);
     this.DOM.detail.scrollTo({ top: 0, behavior: "instant" });
     this.lastDetailScrollTop = 0;
     this.revealDetailHero();
@@ -1304,6 +1496,7 @@ export default class Manager extends Views {
     this.lastDetailScrollTop = 0;
     this.resetBottomPushIntent("detail");
     if (this.DOM.detail) this.DOM.detail.style.overflowY = "";
+    this.cancelGalleryAppend();
     window.clearTimeout(this.detailBottomUnlockTimer);
     if (this.isMobile) window.scrollTo({ top: 0, behavior: "auto" });
   }
@@ -1315,6 +1508,19 @@ export default class Manager extends Views {
       if (intro) {
         GSAP.fromTo(intro, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.24, ease: "power1.out" });
       }
+      this.revealGalleryItems(items, 0);
+      return;
+    }
+
+    if (intro) {
+      GSAP.fromTo(intro, { autoAlpha: 0, y: 44 }, { autoAlpha: 1, y: 0, duration: 0.85, ease: "expo.out" });
+    }
+    this.revealGalleryItems(items, 0);
+  }
+
+  revealGalleryItems(items, offset = 0) {
+    if (!items.length) return;
+    if (this.isMobile) {
       items.forEach((item) => {
         GSAP.set(item, { "--reveal": "105%" });
         const image = item.querySelector("img");
@@ -1324,13 +1530,11 @@ export default class Manager extends Views {
       return;
     }
 
-    if (intro) {
-      GSAP.fromTo(intro, { autoAlpha: 0, y: 44 }, { autoAlpha: 1, y: 0, duration: 0.85, ease: "expo.out" });
-    }
     items.forEach((item, index) => {
+      const sequenceIndex = offset + index;
       GSAP.set(item, { "--reveal": "0%" });
-      GSAP.to(item, { "--reveal": "105%", duration: 1.05, delay: index * 0.055 + 0.25, ease: "expo.inOut" });
-      GSAP.fromTo(item.querySelector("img"), { scale: 0.94 }, { scale: 1, duration: 1, delay: index * 0.04, ease: "expo.out" });
+      GSAP.to(item, { "--reveal": "105%", duration: 1.05, delay: Math.min(sequenceIndex, 8) * 0.055 + 0.12, ease: "expo.inOut" });
+      GSAP.fromTo(item.querySelector("img"), { scale: 0.94 }, { scale: 1, duration: 1, delay: Math.min(sequenceIndex, 8) * 0.04, ease: "expo.out" });
     });
   }
 
