@@ -12,7 +12,7 @@ const Init = async () => {
   };
 
   const Metadata = {
-    title: "靳浩然作品集 | 视觉设计师",
+    title: "Rocky作品集 | 视觉设计师",
     icon: "Meta/favicon.ico",
     keyword: "靳浩然, 作品集, 视觉设计师, 运营设计师, AIGC",
     author: "靳浩然",
@@ -24,7 +24,7 @@ const Init = async () => {
   const SSRSEO = () => {
     return (
       <div id="SSRSEO">
-        <h1>靳浩然作品集</h1>
+        <h1>Rocky作品集</h1>
         <p>视觉设计师 / 运营设计师 / AIGC WORKFLOW</p>
       </div>
     );
